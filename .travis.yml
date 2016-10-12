@@ -1,0 +1,27 @@
+language: scala
+scala:
+  - 2.11.8
+
+dist: trusty
+sudo: required
+install:
+  - true
+jdk:
+  - oraclejdk8
+
+branches:
+  only:
+  - release
+
+script:
+  - sbt -J-XX:ReservedCodeCacheSize=256M ++$TRAVIS_SCALA_VERSION update test:compile 'set concurrentRestrictions in Global += Tags.limit(Tags.Test, 1)' test
+  # Tricks to avoid unnecessary cache updates
+  - find $HOME/.sbt -name "*.lock" | xargs rm
+  - find $HOME/.ivy2 -name "ivydata-*.properties" | xargs rm
+
+cache:
+  directories:
+    - $HOME/.ivy2/cache
+    - $HOME/.sbt/boot/scala-$TRAVIS_SCALA_VERSION
+    - $HOME/.sbt/cache
+    - $HOME/.sbt/launchers
