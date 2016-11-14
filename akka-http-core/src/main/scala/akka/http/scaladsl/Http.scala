@@ -17,6 +17,7 @@ import akka.http.impl.engine.client._
 import akka.http.impl.engine.server._
 import akka.http.impl.engine.ws.WebSocketClientBlueprint
 import akka.http.impl.settings.{ ConnectionPoolSetup, HostConnectionPoolSetup }
+import akka.http.impl.util.LogByteStringTools
 import akka.http.scaladsl.model._
 import akka.http.scaladsl.model.headers.Host
 import akka.http.scaladsl.model.ws.{ Message, WebSocketRequest, WebSocketUpgradeResponse }
@@ -314,10 +315,11 @@ class HttpExt(private val config: Config)(implicit val system: ActorSystem) exte
     val transportFlow = Tcp().outgoingConnection(InetSocketAddress.createUnresolved(host, port), localAddress,
       settings.socketOptions, halfClose = true, settings.connectingTimeout, settings.idleTimeout)
 
-    tlsStage.joinMat(transportFlow) { (_, tcpConnFuture) ⇒
-      import system.dispatcher
-      tcpConnFuture map { tcpConn ⇒ OutgoingConnection(tcpConn.localAddress, tcpConn.remoteAddress) }
-    }
+    (LogByteStringTools.logTLSBidi("plain", 30 * 16) atop tlsStage)
+      .joinMat(transportFlow) { (_, tcpConnFuture) ⇒
+        import system.dispatcher
+        tcpConnFuture map { tcpConn ⇒ OutgoingConnection(tcpConn.localAddress, tcpConn.remoteAddress) }
+      }
   }
 
   type ClientLayer = Http.ClientLayer

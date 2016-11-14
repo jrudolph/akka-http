@@ -111,7 +111,7 @@ private[http] class HttpResponseParser(protected val settings: ParserSettings, p
         contextForCurrentResponse.get.oneHundredContinueTrigger match {
           case None ⇒ closeAfterResponseCompletion
           case Some(trigger) if statusCode.isSuccess ⇒
-            trigger.trySuccess(())
+            //trigger.trySuccess(())
             closeAfterResponseCompletion
           case Some(trigger) ⇒
             trigger.tryFailure(OneHundredContinueError)

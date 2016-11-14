@@ -17,7 +17,11 @@ import akka.stream.scaladsl.Source
 import akka.http.scaladsl.model._
 import akka.http.impl.util._
 import RenderSupport._
+import akka.stream.{ Attributes, FlowShape, Inlet, Outlet }
+import akka.stream.stage.{ GraphStage, GraphStageLogic, InHandler, OutHandler }
 import headers._
+
+import scala.util.{ Failure, Success, Try }
 
 /**
  * INTERNAL API
@@ -111,8 +115,52 @@ private[http] class HttpRequestRendererFactory(
       val stream = ctx.sendEntityTrigger match {
         case None ⇒ headerPart ++ body
         case Some(future) ⇒
-          val barrier = Source.fromFuture(future).drop(1).asInstanceOf[Source[ByteString, Any]]
-          (headerPart ++ barrier ++ body).recoverWithRetries(-1, { case HttpResponseParser.OneHundredContinueError ⇒ Source.empty })
+          println("Found trigger!")
+          /*future.onComplete {
+            res ⇒ println("Trigger fired!")
+          }()*/
+          class LoggingGraphstage[T](future: Future[NotUsed]) extends GraphStage[FlowShape[T, T]] {
+            val in = Inlet[T]("log.in")
+            val out = Outlet[T]("log.out")
+
+            val shape: FlowShape[T, T] = FlowShape(in, out)
+
+            def createLogic(inheritedAttributes: Attributes): GraphStageLogic = new GraphStageLogic(shape) with InHandler with OutHandler {
+              setHandlers(in, out, this)
+
+              var wasPulled = false
+              override def preStart(): Unit = {
+                future.onComplete {
+                  getAsyncCallback[Try[NotUsed]] {
+                    case Success(_) if wasPulled ⇒
+                      println("out already pulled, now pulling in")
+                      pull(in)
+                    case Success(_) ⇒
+                      println("waiting for outside pull")
+                    case Failure(ex) ⇒ failStage(ex)
+                  }.invoke
+                }(interpreter.materializer.executionContext)
+              }
+
+              def onPush(): Unit = {
+                println("pushing t")
+                push(out, grab(in))
+              }
+
+              def onPull(): Unit =
+                if (future.value.isDefined) {
+                  println("Future was already completed, pulling directly")
+                  pull(in)
+                } else {
+                  println("Waiting for future")
+                  wasPulled = true
+                }
+            }
+          }
+
+          /*val barrier =
+            Source.fromFuture(future).drop(1).asInstanceOf[Source[ByteString, Any]]*/
+          (headerPart ++ body.log("body").via(new LoggingGraphstage(future))).recoverWithRetries(-1, { case HttpResponseParser.OneHundredContinueError ⇒ Source.empty })
       }
       RequestRenderingOutput.Streamed(stream)
     }
