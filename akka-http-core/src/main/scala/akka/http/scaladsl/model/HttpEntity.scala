@@ -32,6 +32,8 @@ import scala.compat.java8.OptionConverters._
 import scala.compat.java8.FutureConverters._
 import java.util.concurrent.CompletionStage
 
+import akka.http.impl.engine.server.Strictifiable
+
 import scala.compat.java8.FutureConverters
 
 /**
@@ -71,9 +73,14 @@ sealed trait HttpEntity extends jm.HttpEntity {
    * The Future is failed with an TimeoutException if the stream isn't completed after the given timeout.
    */
   def toStrict(timeout: FiniteDuration)(implicit fm: Materializer): Future[HttpEntity.Strict] =
-    dataBytes
-      .via(new akka.http.impl.util.ToStrict(timeout, contentType))
-      .runWith(Sink.head)
+    dataBytes.module.attributes.get[Strictifiable] match {
+      case Some(strictifiable) ⇒
+        strictifiable.toStrict(timeout)
+      case None ⇒
+        dataBytes
+          .via(new akka.http.impl.util.ToStrict(timeout, contentType))
+          .runWith(Sink.head)
+    }
 
   /**
    * Discards the entities data bytes by running the `dataBytes` Source contained in this `entity`.

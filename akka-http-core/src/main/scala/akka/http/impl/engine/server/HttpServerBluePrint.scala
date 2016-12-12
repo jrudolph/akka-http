@@ -33,6 +33,9 @@ import akka.http.javadsl.model
 import akka.http.scaladsl.model._
 import akka.http.scaladsl.model.ws.Message
 import akka.http.impl.util.LogByteStringTools._
+import akka.stream.Attributes.Attribute
+import akka.stream.impl.StreamLayout
+import akka.stream.impl.fusing.GraphStages.SimpleLinearGraphStage
 
 /**
  * INTERNAL API
@@ -58,6 +61,7 @@ import akka.http.impl.util.LogByteStringTools._
 private[http] object HttpServerBluePrint {
   def apply(settings: ServerSettings, log: LoggingAdapter): Http.ServerLayer =
     userHandlerGuard(settings.pipeliningLimit) atop
+      toStrictSupport atop
       requestTimeoutSupport(settings.timeouts.requestTimeout) atop
       requestPreparation(settings) atop
       controller(settings, log) atop
@@ -83,6 +87,9 @@ private[http] object HttpServerBluePrint {
 
   def requestTimeoutSupport(timeout: Duration): BidiFlow[HttpResponse, HttpResponse, HttpRequest, HttpRequest, NotUsed] =
     BidiFlow.fromGraph(new RequestTimeoutSupport(timeout)).reversed
+
+  val toStrictSupport: BidiFlow[HttpResponse, HttpResponse, HttpRequest, HttpRequest, NotUsed] =
+    BidiFlow.fromFlows(Flow[HttpResponse], Flow[HttpRequest].map(requestToStrictSupport))
 
   /**
    * Two state stage, either transforms an incoming RequestOutput into a HttpRequest with strict entity and then pushes
@@ -136,8 +143,7 @@ private[http] object HttpServerBluePrint {
         if (completionDeferred) {
           completeStage()
         } else {
-          setHandler(in, this)
-          setHandler(out, this)
+          setHandlers(in, out, this)
           if (downstreamPullWaiting) {
             downstreamPullWaiting = false
             pull(in)
@@ -192,8 +198,7 @@ private[http] object HttpServerBluePrint {
           }
         }
 
-        setHandler(in, chunkedRequestHandler)
-        setHandler(out, chunkedRequestHandler)
+        setHandlers(in, out, chunkedRequestHandler)
         creator(Source.fromGraph(entitySource.source))
       }
 
@@ -696,4 +701,21 @@ private[http] object HttpServerBluePrint {
   }
 
   private case class SubscriptionTimeout(andThen: () ⇒ Unit)
+
+  def requestToStrictSupport(req: HttpRequest): HttpRequest = {
+    class MaybeStrictEntityData(underlying: Source[ByteString, Any]) extends GraphStage[SourceShape[ByteString]] {
+      val dataOut = Outlet[ByteString]("MaybeStrictEntityData.dataOut")
+      val shape: SourceShape[ByteString] = SourceShape(dataOut)
+
+      @scala.throws[Exception](classOf[Exception])
+      def createLogic(inheritedAttributes: Attributes): GraphStageLogic = new GraphStageLogic(shape) {
+
+      }
+    }
+
+    req.mapEntity {
+      case default: HttpEntity.Default ⇒ default
+      case x                           ⇒ x
+    }
+  }
 }

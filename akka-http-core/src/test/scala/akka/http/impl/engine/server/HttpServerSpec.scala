@@ -20,6 +20,7 @@ import akka.stream.testkit._
 import akka.stream.{ ActorMaterializer, Fusing }
 import akka.testkit.AkkaSpec
 import akka.util.ByteString
+import org.scalactic.source
 import org.scalatest.Inside
 
 import scala.annotation.tailrec
@@ -1115,6 +1116,62 @@ class HttpServerSpec extends AkkaSpec(
         sendDefaultRequestWithLength(11)
         expectRequest().mapEntity(nameDataSource("foo")).expectDefaultEntityWithSizeError(limit = 10, actualSize = 11)
       }
+    }
+
+    "support safe strictification" which afterWord("was applied") {
+      implicit class WithInTested(name: String) {
+        def inStopAtEnd(f: ⇒ TestSetup /* Assertion */ )(implicit pos: source.Position): Unit =
+          assertAllStagesStopped {
+            val res = f
+            res.shutdownBlueprint()
+          }
+      }
+
+      "to an already strict entity" inStopAtEnd new TestSetup {
+        send("""POST /strict HTTP/1.1
+               |Host: example.com
+               |Content-Length: 12
+               |
+               |abcdefghijkl""")
+
+        val expectedEntity = HttpEntity.Strict(ContentTypes.`application/octet-stream`, ByteString("abcdefghijkl"))
+        val req = expectRequest()
+        req.entity shouldEqual expectedEntity
+        req.entity.toStrict(1.second).awaitResult(1.second) shouldEqual expectedEntity
+      }
+      "to a Default entity" inStopAtEnd new TestSetup {
+        send("""POST /strict HTTP/1.1
+               |Host: example.com
+               |Content-Length: 12
+               |
+               |""")
+
+        val expectedEntity = HttpEntity.Strict(ContentTypes.`application/octet-stream`, ByteString("abcdefghijkl"))
+        val req = expectRequest()
+
+        inside(req.entity) {
+          case HttpEntity.Default(ContentTypes.`application/octet-stream`, 12, source) ⇒
+            val toStrict1 = req.entity.toStrict(1.second)
+
+            send("abcdefghijkl")
+            toStrict1.awaitResult(1.second) shouldEqual expectedEntity
+            req.entity.toStrict(1.second).awaitResult(1.second) shouldEqual expectedEntity
+        }
+      }
+      "to a transformed Default entity" in pending
+      "to a Chunked entity" in pending
+      "to a transformed Chunked entity" in pending
+      "to a CloseDelimited entity" in pending
+      "to a transformed CloseDelimited entity" in pending
+    }
+    "support safe entity discarding" which afterWord("was applied") {
+      "to an already strict entity" in pending
+      "to a Default entity" in pending
+      "to a transformed Default entity" in pending
+      "to a Chunked entity" in pending
+      "to a transformed Chunked entity" in pending
+      "to a CloseDelimited entity" in pending
+      "to a transformed CloseDelimited entity" in pending
     }
   }
   class TestSetup(maxContentLength: Int = -1) extends HttpServerTestSetupBase {

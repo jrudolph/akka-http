@@ -6,7 +6,12 @@ package akka.http.impl.engine.server
 
 import java.net.InetSocketAddress
 
+import akka.http.scaladsl.model.HttpEntity
 import akka.stream.Attributes
+import akka.stream.Attributes.Attribute
+
+import scala.concurrent.Future
+import scala.concurrent.duration.FiniteDuration
 
 /**
  * INTERNAL API
@@ -23,4 +28,8 @@ private[akka] object HttpAttributes {
 
   private[akka] val empty =
     Attributes()
+}
+
+private[http] trait Strictifiable extends Attribute {
+  def toStrict(timeout: FiniteDuration): Future[HttpEntity.Strict]
 }
