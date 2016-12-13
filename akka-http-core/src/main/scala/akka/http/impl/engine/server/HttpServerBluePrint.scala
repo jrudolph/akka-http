@@ -33,9 +33,14 @@ import akka.http.javadsl.model
 import akka.http.scaladsl.model._
 import akka.http.scaladsl.model.ws.Message
 import akka.http.impl.util.LogByteStringTools._
+import akka.http.scaladsl.model.HttpEntity.{ Chunk, ChunkStreamPart }
 import akka.stream.Attributes.Attribute
 import akka.stream.impl.StreamLayout
+import akka.stream.impl.fusing.GraphInterpreter
 import akka.stream.impl.fusing.GraphStages.SimpleLinearGraphStage
+
+import scala.annotation.tailrec
+import scala.util.{ Failure, Success, Try }
 
 /**
  * INTERNAL API
@@ -59,16 +64,19 @@ import akka.stream.impl.fusing.GraphStages.SimpleLinearGraphStage
  *                 +----------+                                   +-------------+  Context    +-----------+
  */
 private[http] object HttpServerBluePrint {
-  def apply(settings: ServerSettings, log: LoggingAdapter): Http.ServerLayer =
+  def apply(settings: ServerSettings, log: LoggingAdapter): Http.ServerLayer = {
     userHandlerGuard(settings.pipeliningLimit) atop
       toStrictSupport atop
+      BidiFlow.fromFlows(logger[HttpResponse]("res"), logger[HttpRequest]("req")) atop
       requestTimeoutSupport(settings.timeouts.requestTimeout) atop
       requestPreparation(settings) atop
       controller(settings, log) atop
       parsingRendering(settings, log) atop
       websocketSupport(settings, log) atop
       tlsSupport atop
-      logTLSBidiBySetting("server-plain-text", settings.logUnencryptedNetworkBytes)
+      logTLSBidiBySetting("server-plain-text", settings.logUnencryptedNetworkBytes) atop
+      BidiFlow.fromFlows(logger[SslTlsOutbound]("netOut"), logger[SslTlsInbound]("netIn"))
+  }
 
   val tlsSupport: BidiFlow[ByteString, SslTlsOutbound, SslTlsInbound, SessionBytes, NotUsed] =
     BidiFlow.fromFlows(Flow[ByteString].map(SendBytes), Flow[SslTlsInbound].collect { case x: SessionBytes ⇒ x })
@@ -199,7 +207,7 @@ private[http] object HttpServerBluePrint {
         }
 
         setHandlers(in, out, chunkedRequestHandler)
-        creator(Source.fromGraph(entitySource.source))
+        creator(Source.fromGraph(entitySource.source).via(logger("urSource")))
       }
 
     }
@@ -703,19 +711,144 @@ private[http] object HttpServerBluePrint {
   private case class SubscriptionTimeout(andThen: () ⇒ Unit)
 
   def requestToStrictSupport(req: HttpRequest): HttpRequest = {
-    class MaybeStrictEntityData(underlying: Source[ByteString, Any]) extends GraphStage[SourceShape[ByteString]] {
-      val dataOut = Outlet[ByteString]("MaybeStrictEntityData.dataOut")
-      val shape: SourceShape[ByteString] = SourceShape(dataOut)
+    class MaybeStrictEntityData[T](chunks: Source[T, Any], createChunk: ByteString ⇒ T, readChunk: T ⇒ ByteString) extends GraphStage[SourceShape[T]] {
+      val dataOut = Outlet[T]("MaybeStrictEntityData.dataOut")
+      val shape: SourceShape[T] = SourceShape(dataOut)
 
-      @scala.throws[Exception](classOf[Exception])
-      def createLogic(inheritedAttributes: Attributes): GraphStageLogic = new GraphStageLogic(shape) {
+      val collectedData = new AtomicReference[Future[ByteString]]()
 
+      @tailrec
+      final def createLogic(inheritedAttributes: Attributes): GraphStageLogic =
+        (collectedData.get(), inheritedAttributes.get[BufferEntity]) match {
+          case (null, None) ⇒ new StreamEntity(inheritedAttributes)
+          case (fut, None)  ⇒ new DeliverCollectedEntity(fut)
+          case (null, Some(BufferEntity(timeout))) ⇒
+            val dataPromise = Promise[ByteString]()
+            if (!collectedData.compareAndSet(null, dataPromise.future))
+              createLogic(inheritedAttributes)
+            else
+              new CollectEntity(dataPromise, inheritedAttributes)
+          case (fut, Some(BufferEntity(timeout))) ⇒ new DeliverCollectedEntity(fut)
+        }
+
+      private class StreamEntity(attributes: Attributes) extends Logic with InHandler {
+        val dataIn = new SubSinkInlet[T]("MaybeStrictEntityData.StreamEntity.dataIn")
+        dataIn.setHandler(this)
+        var isRunning = false
+
+        def onPush(): Unit = push(dataOut, dataIn.grab())
+        def onPull(): Unit = {
+          if (!isRunning) {
+            isRunning = true
+            chunks.addAttributes(attributes) /*.withAttributes(Attributes.inputBuffer(1, 1))*/ .runWith(dataIn.sink)(subFusingMaterializer)
+          }
+          dataIn.pull()
+        }
+        override def onDownstreamFinish(): Unit = {
+          dataIn.cancel()
+          super.onDownstreamFinish()
+        }
+      }
+      private class CollectEntity(promise: Promise[ByteString], attributes: Attributes) extends Logic with InHandler {
+        var data = ByteString.empty
+
+        val dataIn = new SubSinkInlet[T]("MaybeStrictEntityData.CollectEntity.dataIn")
+        dataIn.setHandler(this)
+
+        override def preStart(): Unit = {
+          chunks.addAttributes(attributes).runWith(dataIn.sink)(subFusingMaterializer)
+          dataIn.pull()
+        }
+
+        def onPush(): Unit = {
+          data ++= readChunk(dataIn.grab())
+          dataIn.pull()
+        }
+        def onPull(): Unit = ()
+
+        override def onUpstreamFinish(): Unit = {
+          promise.success(data)
+          emit(dataOut, createChunk(data), () ⇒ completeStage())
+        }
+        override def onUpstreamFailure(ex: Throwable): Unit = {
+          promise.failure(ex)
+          super.onUpstreamFailure(ex)
+        }
+        override def onDownstreamFinish(): Unit = () // ignore, we still continue collecting
+      }
+      private class DeliverCollectedEntity(data: Future[ByteString]) extends Logic {
+        def onPull(): Unit =
+          data.value match {
+            case Some(result) ⇒ handleData(result)
+            case None         ⇒ data.onComplete(getAsyncCallback(handleData).invoke)(GraphInterpreter.currentInterpreter.materializer.executionContext)
+          }
+
+        def handleData(data: Try[ByteString]): Unit = data match {
+          case Success(data) ⇒
+            push(dataOut, createChunk(data))
+            completeStage()
+          case Failure(ex) ⇒ failStage(ex)
+        }
+      }
+
+      private abstract class Logic extends GraphStageLogic(shape) with OutHandler {
+        setHandler(dataOut, this)
       }
     }
 
     req.mapEntity {
-      case default: HttpEntity.Default ⇒ default
-      case x                           ⇒ x
+      case default: HttpEntity.Default ⇒
+        default.copy(data = Source.fromGraph(new MaybeStrictEntityData[ByteString](default.data, identity, identity)).via(logger("newData")))
+      case chunked: HttpEntity.Chunked ⇒
+        chunked.copy(chunks = Source.fromGraph(new MaybeStrictEntityData[ChunkStreamPart](chunked.chunks.via(logger("origChunks")), Chunk(_), _.data))
+          .via(logger("newChunks")))
+      case x ⇒ x
     }
+  }
+  def requestToStrictSupportDummy(req: HttpRequest): HttpRequest = {
+    req.mapEntity {
+      case chunked: HttpEntity.Chunked ⇒
+        chunked.copy(chunks = chunked.chunks.via(logger("entity")))
+      case x ⇒ x
+    }
+  }
+
+  private def logger[T](name: String): Flow[T, T, Any] = {
+
+    class Log[T](name: String) extends SimpleLinearGraphStage[T] {
+      def createLogic(inheritedAttributes: Attributes): GraphStageLogic = new GraphStageLogic(shape) with InHandler with OutHandler {
+        setHandlers(in, out, this)
+
+        val doLog = true
+        def println(msg: String): Unit = if (doLog) Console.println(msg)
+
+        def onPush(): Unit = {
+          val ele = grab(in)
+          println(s"[$name] pushed $ele")
+          push(out, ele)
+        }
+        def onPull(): Unit = {
+          println(s"[$name] pulled")
+          pull(in)
+        }
+
+        override def onUpstreamFinish(): Unit = {
+          println(s"[$name] completed")
+          super.onUpstreamFinish()
+        }
+
+        override def onUpstreamFailure(ex: Throwable): Unit = {
+          println(s"[$name] failed with $ex")
+          if (doLog) ex.printStackTrace()
+          super.onUpstreamFailure(ex)
+        }
+
+        override def onDownstreamFinish(): Unit = {
+          println(s"[$name] was cancelled")
+          super.onDownstreamFinish()
+        }
+      }
+    }
+    Flow[T].via(new Log(name))
   }
 }

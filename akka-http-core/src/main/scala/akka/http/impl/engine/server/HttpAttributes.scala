@@ -9,8 +9,9 @@ import java.net.InetSocketAddress
 import akka.http.scaladsl.model.HttpEntity
 import akka.stream.Attributes
 import akka.stream.Attributes.Attribute
+import akka.util.ByteString
 
-import scala.concurrent.Future
+import scala.concurrent.{ Future, Promise }
 import scala.concurrent.duration.FiniteDuration
 
 /**
@@ -30,6 +31,4 @@ private[akka] object HttpAttributes {
     Attributes()
 }
 
-private[http] trait Strictifiable extends Attribute {
-  def toStrict(timeout: FiniteDuration): Future[HttpEntity.Strict]
-}
+private[http] final case class BufferEntity(timeout: FiniteDuration) extends Attribute

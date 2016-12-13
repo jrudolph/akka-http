@@ -4,37 +4,33 @@
 
 package akka.http.scaladsl.model
 
-import java.util.OptionalLong
-
-import akka.http.impl.model.JavaInitialization
-
-import language.implicitConversions
 import java.io.File
-import java.nio.file.{ Files, Path }
 import java.lang.{ Iterable ⇒ JIterable }
-
-import scala.util.control.NonFatal
-import scala.concurrent.Future
-import scala.concurrent.duration._
-import scala.collection.immutable
-import akka.util.ByteString
-import akka.stream.scaladsl._
-import akka.stream.stage._
-import akka.stream._
-import akka.{ Done, NotUsed, stream }
-import akka.http.scaladsl.model.ContentType.{ Binary, NonBinary }
-import akka.http.scaladsl.util.FastFuture
-import akka.http.javadsl.{ model ⇒ jm }
-import akka.http.impl.util.{ JavaMapping, StreamUtils }
-import akka.http.impl.util.JavaMapping.Implicits._
-
-import scala.compat.java8.OptionConverters._
-import scala.compat.java8.FutureConverters._
+import java.nio.file.{ Files, Path }
+import java.util.OptionalLong
 import java.util.concurrent.CompletionStage
 
-import akka.http.impl.engine.server.Strictifiable
+import akka.http.impl.engine.server.BufferEntity
+import akka.http.impl.model.JavaInitialization
+import akka.http.impl.util.JavaMapping.Implicits._
+import akka.http.impl.util.{ JavaMapping, StreamUtils }
+import akka.http.javadsl.{ model ⇒ jm }
+import akka.http.scaladsl.model.ContentType.{ Binary, NonBinary }
+import akka.http.scaladsl.util.FastFuture
+import akka.stream._
+import akka.stream.scaladsl._
+import akka.stream.stage._
+import akka.util.ByteString
+import akka.{ Done, NotUsed, stream }
 
+import scala.collection.immutable
 import scala.compat.java8.FutureConverters
+import scala.compat.java8.FutureConverters._
+import scala.compat.java8.OptionConverters._
+import scala.concurrent.duration._
+import scala.concurrent.{ Future, Promise }
+import scala.language.implicitConversions
+import scala.util.control.NonFatal
 
 /**
  * Models the entity (aka "body" or "content) of an HTTP message.
@@ -73,14 +69,10 @@ sealed trait HttpEntity extends jm.HttpEntity {
    * The Future is failed with an TimeoutException if the stream isn't completed after the given timeout.
    */
   def toStrict(timeout: FiniteDuration)(implicit fm: Materializer): Future[HttpEntity.Strict] =
-    dataBytes.module.attributes.get[Strictifiable] match {
-      case Some(strictifiable) ⇒
-        strictifiable.toStrict(timeout)
-      case None ⇒
-        dataBytes
-          .via(new akka.http.impl.util.ToStrict(timeout, contentType))
-          .runWith(Sink.head)
-    }
+    dataBytes
+      .addAttributes(Attributes(BufferEntity(timeout)))
+      .via(new akka.http.impl.util.ToStrict(timeout, contentType))
+      .runWith(Sink.head)
 
   /**
    * Discards the entities data bytes by running the `dataBytes` Source contained in this `entity`.

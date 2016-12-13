@@ -30,7 +30,7 @@ import scala.util.Random
 
 class HttpServerSpec extends AkkaSpec(
   """akka.loggers = []
-     akka.loglevel = OFF
+     akka.loglevel = DEBUG
      akka.http.server.request-timeout = infinite""") with Inside { spec ⇒
   implicit val materializer = ActorMaterializer()
 
@@ -360,9 +360,9 @@ class HttpServerSpec extends AkkaSpec(
              |abcdef
              |6
              |abcdef
-             |0
-             |
-             |""")
+             |6
+             |abcdef
+             |""") // don't send the last chunk, yet
 
       inside(expectRequest()) {
         case HttpRequest(POST, _, _, HttpEntity.Chunked(_, data), _) ⇒
@@ -1121,11 +1121,15 @@ class HttpServerSpec extends AkkaSpec(
     "support safe strictification" which afterWord("was applied") {
       implicit class WithInTested(name: String) {
         def inStopAtEnd(f: ⇒ TestSetup /* Assertion */ )(implicit pos: source.Position): Unit =
-          assertAllStagesStopped {
+          name in assertAllStagesStopped {
             val res = f
             res.shutdownBlueprint()
           }
       }
+      def collectToString(entity: HttpEntity): String =
+        entity.dataBytes.fold(ByteString.empty)(_ ++ _)
+          .runWith(Sink.head)
+          .awaitResult(1.second).utf8String
 
       "to an already strict entity" inStopAtEnd new TestSetup {
         send("""POST /strict HTTP/1.1
@@ -1156,13 +1160,83 @@ class HttpServerSpec extends AkkaSpec(
             send("abcdefghijkl")
             toStrict1.awaitResult(1.second) shouldEqual expectedEntity
             req.entity.toStrict(1.second).awaitResult(1.second) shouldEqual expectedEntity
+            collectToString(req.entity) shouldEqual "abcdefghijkl"
         }
       }
-      "to a transformed Default entity" in pending
-      "to a Chunked entity" in pending
-      "to a transformed Chunked entity" in pending
-      "to a CloseDelimited entity" in pending
-      "to a transformed CloseDelimited entity" in pending
+      "to a transformed Default entity" inStopAtEnd new TestSetup {
+        send("""POST /strict HTTP/1.1
+               |Host: example.com
+               |Content-Length: 12
+               |
+               |""")
+
+        val expectedEntity = HttpEntity.Strict(ContentTypes.`application/octet-stream`, ByteString("bcdefghijklm"))
+        val req = expectRequest()
+
+        inside(req.entity) {
+          case HttpEntity.Default(ContentTypes.`application/octet-stream`, 12, source) ⇒
+            implicit val ec = system.dispatcher
+            val transformed = req.entity.transformDataBytes(Flow[ByteString].map(_.map(b ⇒ (b + 1).toByte)))
+            val toStrict1 = transformed.toStrict(1.second)
+
+            send("abcdefghijkl")
+            toStrict1.awaitResult(1.second) shouldEqual expectedEntity
+            transformed.toStrict(1.second).awaitResult(1.second) shouldEqual expectedEntity
+            collectToString(transformed) shouldEqual "bcdefghijklm"
+        }
+      }
+      "to a Chunked entity" inStopAtEnd new TestSetup {
+        send("""POST /strict HTTP/1.1
+               |Host: example.com
+               |Transfer-Encoding: chunked
+               |
+               |6
+               |abcdef
+               |6
+               |ghijkl
+               |""")
+
+        val expectedEntity = HttpEntity.Strict(ContentTypes.`application/octet-stream`, ByteString("abcdefghijkl"))
+        val req = expectRequest()
+
+        inside(req.entity) {
+          case HttpEntity.Chunked(ContentTypes.`application/octet-stream`, source) ⇒
+            implicit val ec = system.dispatcher
+            val entity = req.entity
+            val toStrict1 = entity.toStrict(1.second)
+
+            send("0\r\n\r\n")
+            toStrict1.awaitResult(1.second) shouldEqual expectedEntity
+            entity.toStrict(1.second).awaitResult(1.second) shouldEqual expectedEntity
+            collectToString(entity) shouldEqual "abcdefghijkl"
+        }
+      }
+      "to a transformed Chunked entity" inStopAtEnd new TestSetup {
+        send("""POST /strict HTTP/1.1
+               |Host: example.com
+               |Transfer-Encoding: chunked
+               |
+               |6
+               |abcdef
+               |6
+               |ghijkl
+               |""")
+
+        val expectedEntity = HttpEntity.Strict(ContentTypes.`application/octet-stream`, ByteString("bcdefghijklm"))
+        val req = expectRequest()
+
+        inside(req.entity) {
+          case HttpEntity.Chunked(ContentTypes.`application/octet-stream`, source) ⇒
+            implicit val ec = system.dispatcher
+            val transformed = req.entity.transformDataBytes(Flow[ByteString].map(_.map(b ⇒ (b + 1).toByte)))
+            val toStrict1 = transformed.toStrict(1.second)
+
+            send("0\r\n\r\n")
+            toStrict1.awaitResult(1.second) shouldEqual expectedEntity
+            transformed.toStrict(1.second).awaitResult(1.second) shouldEqual expectedEntity
+            collectToString(transformed) shouldEqual "bcdefghijklm"
+        }
+      }
     }
     "support safe entity discarding" which afterWord("was applied") {
       "to an already strict entity" in pending
