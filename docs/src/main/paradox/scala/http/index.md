@@ -1,5 +1,5 @@
 <a id="http-scala"></a>
-# Akka HTTP
+# Scala Overview
 
 Akka HTTP API - @scaladoc:[ScalaDoc](akka.http.scaladsl.index)
 

@@ -4,8 +4,8 @@
 
 @@@ index
 
-* [java](java.md)
-* [scala](scala.md)
 * [security](security.md)
+* [java/http/index](java/http/index.md)
+* [scala/http/index](scala/http/index.md)
 
 @@@
