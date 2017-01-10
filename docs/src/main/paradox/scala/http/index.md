@@ -1,4 +1,3 @@
-<a id="http-scala"></a>
 # Scala Overview
 
 Akka HTTP API - @scaladoc:[ScalaDoc](akka.http.scaladsl.index)
@@ -7,17 +6,14 @@ Akka HTTP API - @scaladoc:[ScalaDoc](akka.http.scaladsl.index)
 
 @@@ index
 
-* [introduction](introduction.md)
-* [configuration](configuration.md)
-* [http-model](common/http-model.md)
-* [common/index](common/index.md)
-* [implications-of-streaming-http-entity](implications-of-streaming-http-entity.md)
-* [low-level-server-side-api](low-level-server-side-api.md)
-* [routing-dsl/index](routing-dsl/index.md)
-* [websocket-support](websocket-support.md)
-* [client-side/index](client-side/index.md)
-* [server-side-https-support](server-side-https-support.md)
-* [handling-blocking-operations-in-akka-http-routes](handling-blocking-operations-in-akka-http-routes.md)
-* [migration-guides-scala](migration-guide/index.md)
+* [intro](01-introduction.md)
+* [usage](02-usage.md)
+* [abstractions](common/index.md)
+* [server](04-server.md)
+* [client](client-side/index.md)
+* [extensions](06-extensions.md)
+* [contributing](07-contributing.md)
+* [faq](08-faq.md)
+* [reference](09-reference.md)
 
 @@@

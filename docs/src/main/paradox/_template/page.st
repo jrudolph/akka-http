@@ -73,9 +73,9 @@
               <div class="small-12 large-9 column" id="docs">
 $page.content$
 
-                <div>
-                  $source()$
-                </div>
+                <div><i><small>
+$source()$
+                </small></i></div>
                 
                 $if(page.next.html)$
                 <div class="nav-next">

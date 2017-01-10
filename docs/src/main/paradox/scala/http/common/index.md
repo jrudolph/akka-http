@@ -1,5 +1,4 @@
-<a id="http-scala-common-scala"></a>
-# Common Abstractions (Client- and Server-Side)
+# 3. Data Types & Abstractions
 
 HTTP and related specifications define a great number of concepts and functionality that is not specific to either
 HTTP's client- or server-side since they are meaningful on both end of an HTTP connection.
@@ -13,6 +12,7 @@ which are specific to one side only.
 
 * [http-model](http-model.md)
 * [uri-model](uri-model.md)
+* [implications-of-streaming-http-entity](../implications-of-streaming-http-entity.md)
 * [marshalling](marshalling.md)
 * [unmarshalling](unmarshalling.md)
 * [de-coding](de-coding.md)
