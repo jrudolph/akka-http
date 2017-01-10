@@ -71,10 +71,10 @@
 
             <div class="page-content row">
               <div class="small-12 large-9 column" id="docs">
-                $page.content$
-                
+$page.content$
+
                 <div>
-                  $source()$  
+                  $source()$
                 </div>
                 
                 $if(page.next.html)$
