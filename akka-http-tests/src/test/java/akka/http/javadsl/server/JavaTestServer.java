@@ -88,8 +88,24 @@ public class JavaTestServer extends AllDirectives { // or import static Directiv
       getFromResourceDirectory("someDir")
     );
 
+    final Route slow = path("slow", () ->
+            get(() -> {
+              CompletableFuture<String> promise = new CompletableFuture<>();
+              new Thread(() -> {
+                System.out.println(Thread.currentThread().getName() + " starting at " + System.currentTimeMillis());
+                try {
+                  Thread.sleep(5000);
+                  promise.complete("after 5");
+                } catch (InterruptedException e) {
+                  promise.completeExceptionally(e);
+                }
+                System.out.println(Thread.currentThread().getName() + " stopping at " + System.currentTimeMillis());
+              }).start();
+              return completeOKWithFutureString(promise);
+            }));
 
     return index
+      .orElse(slow)
       .orElse(secure)
       .orElse(ping)
       .orElse(crash)
