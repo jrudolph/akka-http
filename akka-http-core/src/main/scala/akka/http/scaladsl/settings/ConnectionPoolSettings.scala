@@ -3,8 +3,10 @@
  */
 package akka.http.scaladsl.settings
 
+import akka.annotation.DoNotInherit
 import akka.http.impl.settings.ConnectionPoolSettingsImpl
 import akka.http.javadsl.{ settings ⇒ js }
+import akka.http.scaladsl.Transport
 import com.typesafe.config.Config
 
 import scala.concurrent.duration.Duration
@@ -12,6 +14,7 @@ import scala.concurrent.duration.Duration
 /**
  * Public API but not intended for subclassing
  */
+@DoNotInherit
 abstract class ConnectionPoolSettings extends js.ConnectionPoolSettings { self: ConnectionPoolSettingsImpl ⇒
   def maxConnections: Int
   def minConnections: Int
@@ -20,6 +23,7 @@ abstract class ConnectionPoolSettings extends js.ConnectionPoolSettings { self: 
   def pipeliningLimit: Int
   def idleTimeout: Duration
   def connectionSettings: ClientConnectionSettings
+  def transport: Transport
 
   /* JAVA APIs */
 
@@ -42,6 +46,7 @@ abstract class ConnectionPoolSettings extends js.ConnectionPoolSettings { self: 
 
   // overloads for idiomatic Scala use
   def withConnectionSettings(newValue: ClientConnectionSettings): ConnectionPoolSettings = self.copy(connectionSettings = newValue)
+  def withTransport(newTransport: Transport): ConnectionPoolSettings = self.copy(transport = newTransport)
 }
 
 object ConnectionPoolSettings extends SettingsCompanion[ConnectionPoolSettings] {
