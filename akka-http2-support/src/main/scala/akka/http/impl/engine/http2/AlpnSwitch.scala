@@ -37,7 +37,8 @@ object AlpnSwitch {
             def onPush(): Unit =
               grab(netIn) match {
                 case first @ SessionBytes(session, bytes) ⇒
-                  val chosen = chosenProtocolAccessor()
+                  println(s"${session} ${session.getValue("chosenProtocol")}")
+                  val chosen = Option(session.getValue("chosenProtocol")).getOrElse("h1")
                   chosen match {
                     case "h2" ⇒ install(http2Stack, first)
                     case _    ⇒ install(http1Stack, first)

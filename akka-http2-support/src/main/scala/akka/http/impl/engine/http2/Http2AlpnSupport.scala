@@ -35,7 +35,9 @@ private[http] object Http2AlpnSupport {
         choose("h1")
 
       def choose(protocol: String): String = try {
-        setChosenProtocol(protocol)
+        val session = engine.getSession
+        session.putValue("chosenProtocol", protocol)
+        println(s"In ALPN handler: ${session} ${session.getValue("chosenProtocol")}")
         protocol
       } finally ALPN.remove(engine)
     })

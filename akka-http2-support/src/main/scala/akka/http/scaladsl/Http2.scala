@@ -32,7 +32,7 @@ class Http2Ext(private val config: Config)(implicit val system: ActorSystem) ext
 
   private[this] final val DefaultPortForProtocol = -1 // any negative value
 
-  val http = Http(system)
+  private val http = Http(system)
 
   def bindAndHandleAsync(
     handler:   HttpRequest ⇒ Future[HttpResponse],
