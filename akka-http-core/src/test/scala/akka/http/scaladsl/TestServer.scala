@@ -30,6 +30,9 @@ object TestServer extends App {
     """)
   implicit val system = ActorSystem("ServerTest", testConf)
 
+  val PingPath = Uri.Path("/ping")
+  val PingResponse = HttpResponse(entity = "PONG!")
+
   val settings = ActorMaterializerSettings(system)
     .withFuzzing(false)
     //    .withSyncProcessingLimit(Int.MaxValue)
@@ -37,13 +40,12 @@ object TestServer extends App {
   implicit val fm = ActorMaterializer(settings)
   try {
     val binding = Http().bindAndHandleSync({
-      case req @ HttpRequest(GET, Uri.Path("/"), _, _, _) if req.header[UpgradeToWebSocket].isDefined ⇒
+      case HttpRequest(GET, Uri(_, _, PingPath, _, _), _, _, _) ⇒ PingResponse
         req.header[UpgradeToWebSocket] match {
           case Some(upgrade) ⇒ upgrade.handleMessages(echoWebSocketService) // needed for running the autobahn test suite
           case None          ⇒ HttpResponse(400, entity = "Not a valid websocket request!")
         }
       case HttpRequest(GET, Uri.Path("/"), _, _, _)      ⇒ index
-      case HttpRequest(GET, Uri.Path("/ping"), _, _, _)  ⇒ HttpResponse(entity = "PONG!")
       case HttpRequest(GET, Uri.Path("/crash"), _, _, _) ⇒ sys.error("BOOM!")
       case req @ HttpRequest(GET, Uri.Path("/ws-greeter"), _, _, _) ⇒
         req.header[UpgradeToWebSocket] match {
