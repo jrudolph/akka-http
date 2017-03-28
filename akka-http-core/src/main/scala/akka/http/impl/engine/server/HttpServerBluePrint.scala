@@ -59,7 +59,7 @@ import akka.http.impl.util.LogByteStringTools._
 private[http] object HttpServerBluePrint {
   def apply(settings: ServerSettings, log: LoggingAdapter, isSecureConnection: Boolean): Http.ServerLayer =
     userHandlerGuard(settings.pipeliningLimit) atop
-      requestTimeoutSupport(settings.timeouts.requestTimeout) atop
+      //requestTimeoutSupport(settings.timeouts.requestTimeout) atop
       requestPreparation(settings) atop
       controller(settings, log) atop
       parsingRendering(settings, log, isSecureConnection) atop
