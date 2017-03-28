@@ -32,13 +32,13 @@ private[http] class HttpResponseRendererFactory(
   responseHeaderSizeHint: Int,
   log:                    LoggingAdapter) {
 
-  private val renderDefaultServerHeader: Rendering ⇒ Unit =
+  private val serverHeaderBytes: ByteString =
     serverHeader match {
-      case Some(h) ⇒
-        val bytes = (new ByteArrayRendering(32) ~~ h ~~ CrLf).get
-        _ ~~ bytes
-      case None ⇒ _ ⇒ ()
+      case Some(h) ⇒ (new ByteStringRendering(32) ~~ h ~~ CrLf).get
+      case None    ⇒ ByteString.empty
     }
+  private def renderDefaultServerHeader(r: Rendering): Unit =
+    r ~~ serverHeaderBytes
 
   // as an optimization we cache the Date header of the last second here
   @volatile private[this] var cachedDateHeader: (Long, Array[Byte]) = (0L, null)
