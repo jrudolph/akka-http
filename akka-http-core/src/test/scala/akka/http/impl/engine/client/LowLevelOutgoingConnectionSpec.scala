@@ -12,13 +12,14 @@ import org.scalatest.Inside
 import akka.http.scaladsl.settings.ClientConnectionSettings
 import akka.util.ByteString
 import akka.event.NoLogging
-import akka.stream.{ ClosedShape, ActorMaterializer }
+import akka.http.impl.engine.ws.ByteStringSinkProbe
+import akka.stream.{ ActorMaterializer, ClosedShape }
 import akka.stream.TLSProtocol._
 import akka.stream.testkit._
 import akka.stream.scaladsl._
 import akka.http.scaladsl.model.HttpEntity._
 import akka.http.scaladsl.model.HttpMethods._
-import akka.http.scaladsl.model._
+import akka.http.scaladsl.model.{ HttpResponse, _ }
 import akka.http.scaladsl.model.headers._
 import akka.http.impl.util._
 import akka.testkit._
@@ -206,7 +207,6 @@ class LowLevelOutgoingConnectionSpec extends AkkaSpec("akka.loggers = []\n akka.
       // two requests are sent in order to make sure that connection
       // isn't immediately closed after the first one by the server
       requestsSub.sendNext(HttpRequest())
-      requestsSub.sendNext(HttpRequest())
       requestsSub.sendComplete()
 
       expectWireData(
@@ -219,28 +219,21 @@ class LowLevelOutgoingConnectionSpec extends AkkaSpec("akka.loggers = []\n akka.
       // two chunks sent by server
       sendWireData(
         """HTTP/1.1 200 OK
-          |Transfer-Encoding: chunked
           |
-          |6
-          |abcdef
-          |6
-          |abcdef
-          |0
-          |
-          |""")
+          |abcdef""")
 
-      inside(expectResponse()) {
-        case HttpResponse(StatusCodes.OK, _, HttpEntity.Chunked(_, data), _) ⇒
-          val dataProbe = TestSubscriber.manualProbe[ChunkStreamPart]
-          // but only one consumed by server
-          data.take(1).to(Sink.fromSubscriber(dataProbe)).run()
-          val sub = dataProbe.expectSubscription()
-          sub.request(1)
-          dataProbe.expectNext(Chunk(ByteString("abcdef")))
-          dataProbe.expectComplete()
-          // connection is closed once requested elements are consumed
-          netInSub.expectCancellation()
-      }
+      val HttpResponse(StatusCodes.OK, _, HttpEntity.CloseDelimited(_, data), _) = expectResponse()
+
+      val dataProbe = ByteStringSinkProbe()
+      data.to(dataProbe.sink).run()
+      dataProbe.expectUtf8EncodedString("abcdef")
+
+      sendWireData("ghijklm")
+      dataProbe.expectUtf8EncodedString("ghijklm")
+
+      dataProbe.cancel()
+      netInSub.expectCancellation()
+      netOut.expectComplete()
     }
 
     "proceed to next response once previous response's entity has been drained" in new TestSetup {

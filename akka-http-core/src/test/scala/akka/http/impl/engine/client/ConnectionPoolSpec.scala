@@ -32,7 +32,7 @@ import scala.util.{ Failure, Success, Try }
 
 class ConnectionPoolSpec extends AkkaSpec("""
     akka.loggers = []
-    akka.loglevel = OFF
+    akka.loglevel = DEBUG
     akka.io.tcp.windows-connection-abort-workaround-enabled = auto
     akka.io.tcp.trace-logging = off
     akka.test.single-expect-default = 5000""") { // timeout for checks, adjust as necessary, set here to 5s
@@ -133,6 +133,42 @@ class ConnectionPoolSpec extends AkkaSpec("""
       responseOutSub.request(1)
       val (Success(response2), 43) = responseOut.expectNext()
       connNr(response2) shouldEqual 1
+    }
+
+    "reuse a slot immediately after the response entity stream was cancelled" in new TestSetup {
+      val reqNr = new AtomicInteger()
+      val dataOut = TestPublisher.probe[ByteString]()
+
+      override def testServerHandler(connNr: Int): HttpRequest ⇒ HttpResponse = _ ⇒
+        reqNr.getAndIncrement() match {
+          case 0 ⇒ HttpResponse(entity = HttpEntity(ContentTypes.`application/octet-stream`, Source.fromPublisher(dataOut)))
+          case 1 ⇒ HttpResponse(entity = "Done!")
+        }
+
+      val settings = ConnectionPoolSettings(system).withMaxConnections(1)
+      val (requestIn, responseOut, responseOutSub, hcp) = cachedHostConnectionPool[Int](maxConnections = 1)
+
+      requestIn.sendNext(HttpRequest(uri = "/a") → 43)
+
+      responseOutSub.request(2)
+      acceptIncomingConnection()
+      val (Success(HttpResponse(StatusCodes.OK, _, entity, _)), 43) = responseOut.expectNext()
+      val dataIn = ByteStringSinkProbe()
+      entity.dataBytes.runWith(dataIn.sink)
+
+      dataIn.ensureSubscription()
+      dataOut.sendNext(ByteString("abc"))
+      dataIn.expectUtf8EncodedString("abc")
+
+      dataIn.cancel()
+      // Next line fails. Why isn't cancellation propagated?
+      // dataOut.expectCancellation()
+
+      // should reuse the single slot immediately (with a new connection)
+      requestIn.sendNext(HttpRequest(uri = "/b") → 43)
+      acceptIncomingConnection()
+      val (Success(HttpResponse(StatusCodes.OK, _, HttpEntity.Strict(_, data), _)), 43) = responseOut.expectNext()
+      data.utf8String should ===("Done!")
     }
 
     "be able to handle 500 pipelined requests against the test server" in new TestSetup {
