@@ -9,7 +9,7 @@ import java.net.InetSocketAddress
 import akka.actor.ActorSystem
 import akka.annotation.ApiMayChange
 import akka.http.scaladsl.Http.OutgoingConnection
-import akka.http.scaladsl.settings.ClientConnectionSettings
+import akka.http.scaladsl.settings.{ ClientConnectionSettings, TcpClientConnectionSettings }
 import akka.stream.scaladsl.{ Flow, Tcp }
 import akka.util.ByteString
 
@@ -23,11 +23,12 @@ trait ClientTransport { outer ⇒
   def connectTo(host: String, port: Int)(implicit system: ActorSystem): Flow[ByteString, ByteString, Future[OutgoingConnection]]
 }
 
+@ApiMayChange
 object ClientTransport {
-  def TCP(localAddress: Option[InetSocketAddress], settings: ClientConnectionSettings): ClientTransport =
+  def TCP(localAddress: Option[InetSocketAddress], settings: TcpClientConnectionSettings): ClientTransport =
     new TCPTransport(localAddress, settings)
 
-  private case class TCPTransport(localAddress: Option[InetSocketAddress], settings: ClientConnectionSettings) extends ClientTransport {
+  private case class TCPTransport(localAddress: Option[InetSocketAddress], settings: TcpClientConnectionSettings) extends ClientTransport {
     def connectTo(host: String, port: Int)(implicit system: ActorSystem): Flow[ByteString, ByteString, Future[OutgoingConnection]] =
       // The InetSocketAddress representing the remote address must be created unresolved because akka.io.TcpOutgoingConnection will
       // not attempt DNS resolution if the InetSocketAddress is already resolved. That behavior is problematic when it comes to

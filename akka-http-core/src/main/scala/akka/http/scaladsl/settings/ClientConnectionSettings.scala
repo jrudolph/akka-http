@@ -12,6 +12,7 @@ import akka.http.impl.util._
 import akka.http.impl.settings.ClientConnectionSettingsImpl
 import akka.http.javadsl.model.headers.UserAgent
 import akka.http.javadsl.{ settings ⇒ js }
+import akka.http.scaladsl.ClientTransport
 import akka.http.scaladsl.model.headers.`User-Agent`
 import akka.io.Inet.SocketOption
 import com.typesafe.config.Config
@@ -26,12 +27,15 @@ import scala.collection.JavaConverters._
  */
 @DoNotInherit
 abstract class ClientConnectionSettings private[akka] () extends akka.http.javadsl.settings.ClientConnectionSettings { self: ClientConnectionSettingsImpl ⇒
+  def connectingTimeout: FiniteDuration = ??? // FIXME
+  def socketOptions: immutable.Seq[SocketOption] = ??? // FIXME
+  def idleTimeout: Duration = ??? // FIXME
+
+  def transport: ClientTransport
+
   def userAgentHeader: Option[`User-Agent`]
-  def connectingTimeout: FiniteDuration
-  def idleTimeout: Duration
   def requestHeaderSizeHint: Int
   def websocketRandomFactory: () ⇒ Random
-  def socketOptions: immutable.Seq[SocketOption]
   def parserSettings: ParserSettings
   def logUnencryptedNetworkBytes: Option[Int]
 
@@ -51,16 +55,20 @@ abstract class ClientConnectionSettings private[akka] () extends akka.http.javad
   // ---
 
   // overrides for more specific return type
-  override def withConnectingTimeout(newValue: FiniteDuration): ClientConnectionSettings = self.copy(connectingTimeout = newValue)
-  override def withIdleTimeout(newValue: Duration): ClientConnectionSettings = self.copy(idleTimeout = newValue)
   override def withRequestHeaderSizeHint(newValue: Int): ClientConnectionSettings = self.copy(requestHeaderSizeHint = newValue)
 
   // overloads for idiomatic Scala use
   def withWebsocketRandomFactory(newValue: () ⇒ Random): ClientConnectionSettings = self.copy(websocketRandomFactory = newValue)
   def withUserAgentHeader(newValue: Option[`User-Agent`]): ClientConnectionSettings = self.copy(userAgentHeader = newValue)
   def withLogUnencryptedNetworkBytes(newValue: Option[Int]): ClientConnectionSettings = self.copy(logUnencryptedNetworkBytes = newValue)
-  def withSocketOptions(newValue: immutable.Seq[SocketOption]): ClientConnectionSettings = self.copy(socketOptions = newValue)
   def withParserSettings(newValue: ParserSettings): ClientConnectionSettings = self.copy(parserSettings = newValue)
+
+  // now managed in TcpClientConnectionSettings
+  override def withConnectingTimeout(newValue: FiniteDuration): ClientConnectionSettings = ??? // FIXME (deprecate?) self.copy(connectingTimeout = newValue)
+  override def withIdleTimeout(newValue: Duration): ClientConnectionSettings = ??? // FIXME (deprecate?) self.copy(idleTimeout = newValue)
+  def withSocketOptions(newValue: immutable.Seq[SocketOption]): ClientConnectionSettings = ??? // FIXME (deprecate?) self.copy(socketOptions = newValue)
+
+  def withTransport(newTransport: ClientTransport): ClientConnectionSettings = self.copy(transport = newTransport)
 }
 
 object ClientConnectionSettings extends SettingsCompanion[ClientConnectionSettings] {

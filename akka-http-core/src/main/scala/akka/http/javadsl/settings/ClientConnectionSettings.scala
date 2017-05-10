@@ -35,14 +35,14 @@ abstract class ClientConnectionSettings private[akka] () { self: ClientConnectio
   // ---
 
   def withUserAgentHeader(newValue: Optional[UserAgent]): ClientConnectionSettings = self.copy(userAgentHeader = newValue.asScala.map(_.asScala))
-  def withConnectingTimeout(newValue: FiniteDuration): ClientConnectionSettings = self.copy(connectingTimeout = newValue)
-  def withIdleTimeout(newValue: Duration): ClientConnectionSettings = self.copy(idleTimeout = newValue)
   def withRequestHeaderSizeHint(newValue: Int): ClientConnectionSettings = self.copy(requestHeaderSizeHint = newValue)
   def withLogUnencryptedNetworkBytes(newValue: Optional[Int]): ClientConnectionSettings = self.copy(logUnencryptedNetworkBytes = OptionConverters.toScala(newValue))
   def withWebsocketRandomFactory(newValue: java.util.function.Supplier[Random]): ClientConnectionSettings = self.copy(websocketRandomFactory = () ⇒ newValue.get())
-  def withSocketOptions(newValue: java.lang.Iterable[SocketOption]): ClientConnectionSettings = self.copy(socketOptions = newValue.asScala.toList)
   def withParserSettings(newValue: ParserSettings): ClientConnectionSettings = self.copy(parserSettings = newValue.asScala)
 
+  def withSocketOptions(newValue: java.lang.Iterable[SocketOption]): ClientConnectionSettings = withSocketOptions(newValue.asScala.toList)
+  def withConnectingTimeout(newValue: FiniteDuration): ClientConnectionSettings
+  def withIdleTimeout(newValue: Duration): ClientConnectionSettings
 }
 
 object ClientConnectionSettings extends SettingsCompanion[ClientConnectionSettings] {

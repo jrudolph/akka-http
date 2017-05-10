@@ -21,20 +21,8 @@ private[akka] final case class ConnectionPoolSettingsImpl(
   maxOpenRequests:    Int,
   pipeliningLimit:    Int,
   idleTimeout:        Duration,
-  connectionSettings: ClientConnectionSettings,
-  transport:          ClientTransport)
+  connectionSettings: ClientConnectionSettings)
   extends ConnectionPoolSettings {
-
-  def this(
-    maxConnections:     Int,
-    minConnections:     Int,
-    maxRetries:         Int,
-    maxOpenRequests:    Int,
-    pipeliningLimit:    Int,
-    idleTimeout:        Duration,
-    connectionSettings: ClientConnectionSettings) =
-    this(maxConnections, minConnections, maxRetries, maxOpenRequests, pipeliningLimit, idleTimeout, connectionSettings,
-      ClientTransport.TCP(None, connectionSettings))
 
   require(maxConnections > 0, "max-connections must be > 0")
   require(minConnections >= 0, "min-connections must be >= 0")
@@ -48,7 +36,7 @@ private[akka] final case class ConnectionPoolSettingsImpl(
 }
 
 object ConnectionPoolSettingsImpl extends SettingsCompanion[ConnectionPoolSettingsImpl]("akka.http.host-connection-pool") {
-  def fromSubConfig(root: Config, c: Config) = {
+  def fromSubConfig(root: Config, c: Config) =
     new ConnectionPoolSettingsImpl(
       c getInt "max-connections",
       c getInt "min-connections",
@@ -58,5 +46,4 @@ object ConnectionPoolSettingsImpl extends SettingsCompanion[ConnectionPoolSettin
       c getPotentiallyInfiniteDuration "idle-timeout",
       ClientConnectionSettingsImpl.fromSubConfig(root, c.getConfig("client"))
     )
-  }
 }

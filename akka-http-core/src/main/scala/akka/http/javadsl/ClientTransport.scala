@@ -15,6 +15,7 @@ import akka.http.javadsl.settings.ClientConnectionSettings
 import akka.http.impl.util.JavaMapping
 import JavaMapping._
 import JavaMapping.Implicits._
+import akka.http.scaladsl.settings.TcpClientConnectionSettings
 import akka.http.{ javadsl, scaladsl }
 
 import scala.concurrent.Future
@@ -24,8 +25,8 @@ abstract class ClientTransport { outer ⇒
 }
 
 object ClientTransport {
-  def TCP(localAddress: Optional[InetSocketAddress], settings: ClientConnectionSettings): ClientTransport =
-    scaladsl.ClientTransport.TCP(localAddress.asScala, settings.asScala).asJava
+  def TCP(localAddress: Optional[InetSocketAddress], settings: TcpClientConnectionSettings): ClientTransport =
+    scaladsl.ClientTransport.TCP(localAddress.asScala, settings /* FIXME */ ).asJava
 
   def fromScala(scalaTransport: scaladsl.ClientTransport): ClientTransport =
     scalaTransport match {

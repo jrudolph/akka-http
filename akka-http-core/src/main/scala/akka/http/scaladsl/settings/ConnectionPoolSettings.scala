@@ -25,7 +25,8 @@ abstract class ConnectionPoolSettings extends js.ConnectionPoolSettings { self: 
   def connectionSettings: ClientConnectionSettings
 
   /** The underlying transport used to connect to hosts. By default [[ClientTransport.TCP]] is used. */
-  def transport: ClientTransport
+  @deprecated(s"Use `connectionSettings.transport` instead")
+  def transport: ClientTransport = connectionSettings.transport
 
   // ---
 
@@ -38,7 +39,8 @@ abstract class ConnectionPoolSettings extends js.ConnectionPoolSettings { self: 
 
   // overloads for idiomatic Scala use
   def withConnectionSettings(newValue: ClientConnectionSettings): ConnectionPoolSettings = self.copy(connectionSettings = newValue)
-  def withTransport(newTransport: ClientTransport): ConnectionPoolSettings = self.copy(transport = newTransport)
+
+  def withTransport(newTransport: ClientTransport): ConnectionPoolSettings = self.copy(connectionSettings = connectionSettings.withTransport(newTransport))
 }
 
 object ConnectionPoolSettings extends SettingsCompanion[ConnectionPoolSettings] {

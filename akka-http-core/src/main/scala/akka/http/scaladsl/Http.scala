@@ -301,7 +301,8 @@ class HttpExt(private val config: Config)(implicit val system: ActorSystem) exte
                          localAddress: Option[InetSocketAddress] = None,
                          settings:     ClientConnectionSettings  = ClientConnectionSettings(system),
                          log:          LoggingAdapter            = system.log): Flow[HttpRequest, HttpResponse, Future[OutgoingConnection]] =
-    _outgoingConnection(host, port, settings, ConnectionContext.noEncryption(), ClientTransport.TCP(localAddress, settings), log)
+    // FIXME given localAddress should override localAddress from the transport (but how?)
+    _outgoingConnection(host, port, settings, ConnectionContext.noEncryption(), log)
 
   /**
    * Same as [[#outgoingConnection]] but for encrypted (HTTPS) connections.
@@ -317,7 +318,7 @@ class HttpExt(private val config: Config)(implicit val system: ActorSystem) exte
                               localAddress:      Option[InetSocketAddress] = None,
                               settings:          ClientConnectionSettings  = ClientConnectionSettings(system),
                               log:               LoggingAdapter            = system.log): Flow[HttpRequest, HttpResponse, Future[OutgoingConnection]] =
-    _outgoingConnection(host, port, settings, connectionContext, ClientTransport.TCP(localAddress, settings), log)
+    _outgoingConnection(host, port, settings, connectionContext, log)
 
   /**
    * Similar to `outgoingConnection` but allows to specify a user-defined transport layer to run the connection on.
@@ -328,6 +329,7 @@ class HttpExt(private val config: Config)(implicit val system: ActorSystem) exte
    * To configure additional settings for requests made using this method,
    * use the `akka.http.client` config section or pass in a [[akka.http.scaladsl.settings.ClientConnectionSettings]] explicitly.
    */
+  @deprecated("Use outgoingConnection or outgoingConnectionHttps instead configuring the transport in the ClientConnectionSettings")
   def outgoingConnectionUsingTransport(
     host:              String,
     port:              Int,
@@ -335,27 +337,25 @@ class HttpExt(private val config: Config)(implicit val system: ActorSystem) exte
     connectionContext: ConnectionContext,
     settings:          ClientConnectionSettings = ClientConnectionSettings(system),
     log:               LoggingAdapter           = system.log): Flow[HttpRequest, HttpResponse, Future[OutgoingConnection]] =
-    _outgoingConnection(host, port, settings, connectionContext, transport, log)
+    _outgoingConnection(host, port, settings, connectionContext, settings.withTransport(transport), log)
 
   private def _outgoingConnection(
     host:              String,
     port:              Int,
     settings:          ClientConnectionSettings,
     connectionContext: ConnectionContext,
-    transport:         ClientTransport,
     log:               LoggingAdapter): Flow[HttpRequest, HttpResponse, Future[OutgoingConnection]] = {
     val hostHeader = if (port == connectionContext.defaultPort) Host(host) else Host(host, port)
     val layer = clientLayer(hostHeader, settings, log)
-    layer.joinMat(_outgoingTlsConnectionLayer(host, port, settings, connectionContext, transport, log))(Keep.right)
+    layer.joinMat(_outgoingTlsConnectionLayer(host, port, settings, connectionContext, log))(Keep.right)
   }
 
   private def _outgoingTlsConnectionLayer(host: String, port: Int,
                                           settings: ClientConnectionSettings, connectionContext: ConnectionContext,
-                                          transport: ClientTransport,
-                                          log:       LoggingAdapter): Flow[SslTlsOutbound, SslTlsInbound, Future[OutgoingConnection]] = {
+                                          log: LoggingAdapter): Flow[SslTlsOutbound, SslTlsInbound, Future[OutgoingConnection]] = {
     val tlsStage = sslTlsStage(connectionContext, Client, Some(host → port))
 
-    tlsStage.joinMat(transport.connectTo(host, port))(Keep.right)
+    tlsStage.joinMat(settings.transport.connectTo(host, port))(Keep.right)
   }
 
   type ClientLayer = Http.ClientLayer
