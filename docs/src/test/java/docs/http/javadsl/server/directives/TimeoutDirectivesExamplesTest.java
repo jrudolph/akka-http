@@ -64,7 +64,7 @@ public class TimeoutDirectivesExamplesTest extends AllDirectives {
     }
 
     private Optional<HttpResponse> runRoute(ActorSystem system, ActorMaterializer materializer, Route route, String routePath) {
-        final Tuple3<InetSocketAddress, String, Object> inetaddrHostAndPort = TestUtils.temporaryServerHostnameAndPort("127.0.0.1");
+        final Tuple3<InetSocketAddress, String, Object> inetaddrHostAndPort = TestUtils.temporaryServerHostnameAndPort();
         Tuple2<String, Integer> hostAndPort = new Tuple2<>(
                 inetaddrHostAndPort._2(),
                 (Integer) inetaddrHostAndPort._3()
