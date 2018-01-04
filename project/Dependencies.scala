@@ -92,7 +92,12 @@ object Dependencies {
 
   lazy val httpCaching = l ++= Seq(caffeine, jsr305, Test.scalatest.value)
 
-  lazy val http = l ++= Seq()
+  lazy val http = Seq(
+    DependencyHelpers.versionDependentDeps(
+      Dependencies.Compile.scalaReflect % "provided"
+    ),
+    addCompilerPlugin("org.scalamacros" % "paradise" % "2.1.1" cross CrossVersion.full)
+  )
 
   lazy val http2 = l ++= Seq(hpack, alpnApi)
 

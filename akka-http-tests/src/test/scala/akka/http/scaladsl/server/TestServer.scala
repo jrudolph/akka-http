@@ -6,7 +6,7 @@ package akka.http.scaladsl.server
 
 import akka.NotUsed
 import akka.http.scaladsl.marshallers.xml.ScalaXmlSupport
-import akka.http.scaladsl.model.{ HttpResponse, StatusCodes }
+import akka.http.scaladsl.model.{ HttpEntity, HttpResponse, StatusCodes }
 import akka.http.scaladsl.server.directives.Credentials
 import com.typesafe.config.{ Config, ConfigFactory }
 import akka.actor.ActorSystem
@@ -14,6 +14,8 @@ import akka.stream._
 import akka.stream.scaladsl._
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.common.EntityStreamingSupport
+import akka.http.scaladsl.server.Directives.entity
+import akka.http.scaladsl.server.tracing.{ RouteTracing, Trace }
 
 import scala.concurrent.duration._
 import scala.io.StdIn
@@ -44,15 +46,12 @@ object TestServer extends App {
   }
 
   // format: OFF
-  val routes = {
+  val routes = traceInner {
+    import tracing.RouteTracing.Implicits._
+
     get {
       path("") {
-        withRequestTimeout(1.milli, _ ⇒ HttpResponse(
-          StatusCodes.EnhanceYourCalm,
-          entity = "Unable to serve response within time limit, please enchance your calm.")) {
-          Thread.sleep(1000)
-          complete(index)
-        }
+        complete(index)
       } ~
       path("secure") {
         authenticateBasicPF("My very secure site", auth) { user ⇒
@@ -93,6 +92,24 @@ object TestServer extends App {
     pathPrefix("inner")(getFromResourceDirectory("someDir"))
   }
   // format: ON
+
+  lazy val traceInner = new Directive0 {
+    def tapply(f: Unit ⇒ Route): Route = {
+      val inner = f(())
+      parameter("trace".?) {
+        case Some("true") ⇒ { ctx ⇒
+          inner(ctx) /*.fast*/ .flatMap { result ⇒
+            val trace = RouteTracing.traceOf(result)
+            val traceStr = Trace.format(trace).map(_ + "\n").runWith(Sink.seq).map(_.mkString)
+            traceStr.foreach(println)
+            val entity = HttpEntity(Trace.format(trace).map(_ + "\n"))
+            complete(entity)(ctx)
+          }
+        }
+        case _ ⇒ inner
+      }
+    }
+  }
 
   val bindingFuture = Http().bindAndHandle(routes, interface = "0.0.0.0", port = 8080)
 

@@ -27,7 +27,16 @@ object RouteResult {
     override def getResponse = response
   }
   final case class Rejected(rejections: immutable.Seq[Rejection]) extends javadsl.server.Rejected with RouteResult {
+    private var _context: AnyRef = _
+
     override def getRejections = rejections.map(r ⇒ r: javadsl.server.Rejection).toIterable.asJava
+
+    private[http] def withContext(context: AnyRef): Rejected = {
+      val c = copy()
+      c._context = context
+      c
+    }
+    private[http] def context: AnyRef = _context
   }
 
   implicit def route2HandlerFlow(route: Route)(implicit

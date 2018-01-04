@@ -260,6 +260,8 @@ sealed trait UniversalEntity extends jm.UniversalEntity with MessageEntity with 
 
 object HttpEntity {
   implicit def apply(string: String): HttpEntity.Strict = apply(ContentTypes.`text/plain(UTF-8)`, string)
+  def apply(streamOfStrings: Source[String, Any]): HttpEntity.Chunked =
+    apply(ContentTypes.`text/plain(UTF-8)`, streamOfStrings.map(ByteString(_)))
   implicit def apply(bytes: Array[Byte]): HttpEntity.Strict = apply(ContentTypes.`application/octet-stream`, bytes)
   implicit def apply(data: ByteString): HttpEntity.Strict = apply(ContentTypes.`application/octet-stream`, data)
   def apply(contentType: ContentType.NonBinary, string: String): HttpEntity.Strict =
