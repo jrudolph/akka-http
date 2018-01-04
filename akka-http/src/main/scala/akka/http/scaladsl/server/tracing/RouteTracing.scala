@@ -137,7 +137,7 @@ object Trace {
           case None              ⇒ other()
         }
       }
-    def ++(other: Stream): Stream = append(other)
+    def ++(other: ⇒ Stream): Stream = append(other)
     def :+(msg: String): Stream = append(Stream.single(msg))
   }
   object Stream {
@@ -149,16 +149,22 @@ object Trace {
 
   type Next = Option[(String, Stream)]
   def format(trace: Trace): Source[String, NotUsed] = {
-    def oneStep(trace: Trace): Stream = trace match {
+    def oneStep(trace: Trace, indent: String): Stream = trace match {
       case FirstSucceeded(firstResult, _) ⇒
-        ("Enter First branch of concat" ::
-          Stream.deferred(oneStep(firstResult))) :+ s"First branch produced result: [${firstResult.result}]"
+        (s"${indent}Enter First branch of concat" ::
+          Stream.deferred(oneStep(firstResult, indent + "  "))) :+ s"${indent}First branch produced result: [${firstResult.result}]"
 
       //case SecondSucceeded()
-      case x ⇒ s"Unknown [$x]" :: Stream.empty
+      case CompositeTrace(info, overall, outer, inner) ⇒
+        (s"${indent}Entering Directive [$info], inner trace following" :: Stream.deferred(oneStep(inner, indent + "  "))) ++
+          (s"${indent}Inner produced result [${inner.result}]" :: s"${indent}Outer trace following" :: oneStep(outer, indent + "  ")) :+
+          s"${indent}Exiting directive with result [$overall]"
+
+      case NoTrace ⇒ Stream.single(s"${indent}No tracing information")
+      case x       ⇒ s"${indent}Unknown [$x]" :: Stream.empty
     }
 
-    Source.unfold(oneStep(trace)) { f ⇒
+    Source.unfold(oneStep(trace, "")) { f ⇒
       f() match {
         case Some((string, cont)) ⇒ Some(cont -> string)
         case None                 ⇒ None
