@@ -30,7 +30,7 @@ class DirectiveExamplesSpec extends RoutingSpec {
   }
 
   "example-2" in {
-    //#getOrPut
+    //#example-2
     def innerRoute(id: Int): Route =
       get {
         complete {
@@ -45,11 +45,11 @@ class DirectiveExamplesSpec extends RoutingSpec {
 
     val route: Route = path("order" / IntNumber) { id => innerRoute(id) }
     verify(route) // #hide
-    //#getOrPut
+    //#example-2
   }
 
   "example-3" in {
-    //#getOrPutUsingPipe
+    //#example-3
     val route =
       path("order" / IntNumber) { id =>
         (get | put) { ctx =>
@@ -57,11 +57,11 @@ class DirectiveExamplesSpec extends RoutingSpec {
         }
       }
     verify(route) // #hide
-    //#getOrPutUsingPipe
+    //#example-3
   }
 
   "example-4" in {
-    //#getOrPutUsingPipeAndExtractMethod
+    //#example-4
     val route =
       path("order" / IntNumber) { id =>
         (get | put) {
@@ -71,7 +71,7 @@ class DirectiveExamplesSpec extends RoutingSpec {
         }
       }
     verify(route) // #hide
-    //#getOrPutUsingPipeAndExtractMethod
+    //#example-4
   }
 
   "example-5" in {

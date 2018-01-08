@@ -4,6 +4,8 @@
 
 package docs.http.javadsl.server.directives;
 
+import java.util.Arrays;
+import java.util.List;
 import akka.http.javadsl.model.HttpHeader;
 import akka.http.javadsl.model.HttpRequest;
 import akka.http.javadsl.model.headers.HttpOrigin;
@@ -13,22 +15,7 @@ import akka.http.javadsl.server.Route;
 import akka.http.javadsl.testkit.JUnitRouteTest;
 import org.junit.Test;
 
-import java.util.Arrays;
-import java.util.List;
-
 public class RespondWithDirectivesExamplesTest extends JUnitRouteTest {
-
-    @Test
-    public void testMultipleHeaders() {
-        //#multiple-headers
-        final List<HttpHeader> headers = Arrays.asList(
-                Origin.create(HttpOrigin.parse("http://akka.io")),
-                RawHeader.create("X-Fish-Name", "Blippy"));
-        respondWithDefaultHeaders(headers, () ->
-                /*...*/
-                complete("Blip!"));
-        //#multiple-headers
-    }
 
     @Test
     public void testRespondWithHeader() {
