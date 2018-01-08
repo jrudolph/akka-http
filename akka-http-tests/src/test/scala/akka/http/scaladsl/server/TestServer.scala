@@ -100,8 +100,8 @@ object TestServer extends App {
         case Some("true") ⇒ { ctx ⇒
           inner(ctx) /*.fast*/ .flatMap { result ⇒
             val trace = RouteTracing.traceOf(result)
-            val traceStr = Trace.format(trace).map(_ + "\n").runWith(Sink.seq).map(_.mkString)
-            traceStr.foreach(println)
+            //val traceStr = Trace.format(trace).map(_ + "\n").runWith(Sink.seq).map(_.mkString)
+            //traceStr.foreach(println)
             val entity = HttpEntity(Trace.format(trace).map(_ + "\n"))
             complete(entity)(ctx)
           }
