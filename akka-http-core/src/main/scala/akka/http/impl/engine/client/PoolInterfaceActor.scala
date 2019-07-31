@@ -24,14 +24,27 @@ import scala.annotation.tailrec
 import scala.concurrent.Promise
 import scala.concurrent.duration.FiniteDuration
 
+private[http] trait PoolInterface {
+  def request(request: HttpRequest, responsePromise: Promise[HttpResponse]): Unit
+  def shutdown(): Unit
+}
+
 private object PoolInterfaceActor {
-  final case class PoolRequest(request: HttpRequest, responsePromise: Promise[HttpResponse]) extends NoSerializationVerificationNeeded
+  def create(gateway: PoolGateway, parent: ActorRefFactory)(implicit fm: Materializer): PoolInterface = new PoolInterface {
+    val ref = parent.actorOf(props(gateway))
+    override def request(request: HttpRequest, responsePromise: Promise[HttpResponse]): Unit =
+      ref ! PoolRequest(request, responsePromise)
+    override def shutdown(): Unit =
+      ref ! Shutdown
+  }
 
-  case object Shutdown extends DeadLetterSuppression
+  private final case class PoolRequest(request: HttpRequest, responsePromise: Promise[HttpResponse]) extends NoSerializationVerificationNeeded
 
-  val name = SeqActorName("PoolInterfaceActor")
+  private case object Shutdown extends DeadLetterSuppression
 
-  def props(gateway: PoolGateway)(implicit fm: Materializer) = Props(new PoolInterfaceActor(gateway)).withDeploy(Deploy.local)
+  private val name = SeqActorName("PoolInterfaceActor")
+
+  private def props(gateway: PoolGateway)(implicit fm: Materializer) = Props(new PoolInterfaceActor(gateway)).withDeploy(Deploy.local)
 
   /**
    * LogSource for PoolGateway instances
