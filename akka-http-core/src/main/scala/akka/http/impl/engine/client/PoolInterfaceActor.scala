@@ -102,8 +102,11 @@ private class PoolInterfaceActor(gateway: PoolGateway)(implicit fm: Materializer
 
     val poolFlow =
       settings.poolImplementation match {
-        case PoolImplementation.Legacy => PoolFlow(connectionFlow, settings, log).named("PoolFlow")
-        case PoolImplementation.New    => NewHostConnectionPool(connectionFlow, settings, log).named("PoolFlow")
+        case PoolImplementation.Legacy =>
+          log.warning("Legacy pool implementation is deprecated and will be removed in the future. " +
+            "Please start using `akka.http.host-connection-pool.pool-implementation = new`, instead.")
+          PoolFlow(connectionFlow, settings, log).named("PoolFlow")
+        case PoolImplementation.New => NewHostConnectionPool(connectionFlow, settings, log).named("PoolFlow")
       }
 
     Source.fromPublisher(ActorPublisher(self)).via(poolFlow).runWith(Sink.fromSubscriber(ActorSubscriber[ResponseContext](self)))
