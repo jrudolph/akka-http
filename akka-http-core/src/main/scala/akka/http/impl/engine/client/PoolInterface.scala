@@ -27,6 +27,7 @@ import akka.stream.stage.InHandler
 import akka.stream.stage.OutHandler
 import akka.stream.stage.TimerGraphStageLogic
 import akka.stream.{ BufferOverflowException, Materializer }
+
 import scala.concurrent.ExecutionContext
 import scala.concurrent.Future
 import scala.concurrent.Promise
@@ -42,11 +43,17 @@ private[http] trait PoolInterface {
    * If the queue in front of the pool is full, the promise will be failed with a BufferOverflowException.
    */
   def request(request: HttpRequest, responsePromise: Promise[HttpResponse]): Unit
-  def shutdown()(implicit ec: ExecutionContext): Future[Done]
-  def whenShutdown: Future[Done]
+  def shutdown()(implicit ec: ExecutionContext): Future[PoolInterface.ShutdownReason]
+  def whenShutdown: Future[PoolInterface.ShutdownReason]
 }
 
 private[http] object PoolInterface {
+  private[http] sealed trait ShutdownReason
+  private[http] object ShutdownReason {
+    case object ShutdownRequested extends ShutdownReason
+    case object IdleTimeout extends ShutdownReason
+  }
+
   def create(gateway: PoolGateway, parent: ActorRefFactory)(implicit fm: Materializer): PoolInterface = {
     import gateway.hcps
     import hcps._
@@ -98,8 +105,9 @@ private[http] object PoolInterface {
         implicit var ec: ExecutionContext = _
         import gateway.hcps
 
-        val shutdownPromise = Promise[Done]()
-        var shuttingDown: Boolean = false
+        val shutdownPromise = Promise[ShutdownReason]()
+        def shuttingDown: Boolean = shuttingDownReason.isDefined
+        var shuttingDownReason: Option[ShutdownReason] = None
         var remainingRequested = 0
 
         setHandlers(responseIn, requestOut, this)
@@ -112,7 +120,7 @@ private[http] object PoolInterface {
 
         override protected def onTimer(timerKey: Any): Unit = {
           log.info("Pool shutting down because idle timer triggered.")
-          requestShutdown()
+          requestShutdown(ShutdownReason.IdleTimeout)
         }
 
         override def onPush(): Unit = {
@@ -134,7 +142,7 @@ private[http] object PoolInterface {
         }
         override def onPull(): Unit = () // just noting the
 
-        val responseCompletedCallback = getAsyncCallback[Done] { _ => remainingRequested -= 1 }
+        val responseCompletedCallback = getAsyncCallback[Done] { _ => remainingRequested -= 1; afterRequestFinished() }
         val requestCallback = getAsyncCallback[(HttpRequest, Promise[HttpResponse])] {
           case (request, responsePromise) =>
             log.debug(s"Got request $request")
@@ -154,22 +162,22 @@ private[http] object PoolInterface {
               responsePromise.tryFailure(PoolOverflowException)
             }
         }
-        val shutdownCallback = getAsyncCallback[Unit] { _ => requestShutdown() }
+        val shutdownCallback = getAsyncCallback[Unit] { _ => requestShutdown(ShutdownReason.ShutdownRequested) }
 
         def afterRequestFinished(): Unit = {
           shutdownIfRequestedAndPossible()
           resetIdleTimer()
         }
 
-        def requestShutdown(): Unit = {
-          shuttingDown = true
+        def requestShutdown(reason: ShutdownReason): Unit = {
+          shuttingDownReason = Some(reason)
           shutdownIfRequestedAndPossible()
         }
         def shutdownIfRequestedAndPossible(): Unit =
           if (shuttingDown) {
             if (remainingRequested == 0) {
               log.info("Pool is now shutting down as requested.")
-              shutdownPromise.trySuccess(Done)
+              shutdownPromise.trySuccess(shuttingDownReason.get)
               completeStage()
             } else
               log.debug(s"Pool is shutting down after waiting for [${remainingRequested}] outstanding requests.")
@@ -183,17 +191,20 @@ private[http] object PoolInterface {
         def shouldStopOnIdle: Boolean =
           !shuttingDown && remainingRequested == 0 && hcps.setup.settings.idleTimeout.isFinite && hcps.setup.settings.minConnections == 0
 
+        override def onUpstreamFailure(ex: Throwable): Unit = shutdownPromise.tryFailure(ex)
+        override def postStop(): Unit = shutdownPromise.tryFailure(new IllegalStateException("Pool shutdown unexpectedly"))
+
         // PoolInterface implementations
         override def request(request: HttpRequest, responsePromise: Promise[HttpResponse]): Unit =
           requestCallback.invokeWithFeedback((request, responsePromise)).failed.foreach { _ =>
             log.debug("Request was sent to pool which was already closed, retrying through the gateway")
             responsePromise.tryCompleteWith(gateway(request))
           }
-        override def shutdown()(implicit ec: ExecutionContext): Future[Done] = {
+        override def shutdown()(implicit ec: ExecutionContext): Future[ShutdownReason] = {
           shutdownCallback.invoke(())
           whenShutdown
         }
-        override def whenShutdown: Future[Done] = shutdownPromise.future
+        override def whenShutdown: Future[ShutdownReason] = shutdownPromise.future
       }
       (Logic, Logic)
     }
@@ -205,7 +216,7 @@ private[http] object PoolInterface {
    * Using this LogSource allows us to set the log class to `PoolInterfaceActor` and the log source string
    * to a descriptive name that describes a particular pool instance.
    */
-  private val GatewayLogSource: LogSource[PoolGateway] =
+  private[http] val GatewayLogSource: LogSource[PoolGateway] =
     new LogSource[PoolGateway] {
       def genString(gateway: PoolGateway): String = {
         val scheme = if (gateway.hcps.setup.connectionContext.isSecure) "https" else "http"
