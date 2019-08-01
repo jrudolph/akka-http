@@ -549,7 +549,7 @@ private[client] object NewHostConnectionPool {
 
         override def onUpstreamFinish(): Unit = {
           log.debug("Pool upstream was completed")
-          super.onDownstreamFinish()
+          super.onUpstreamFinish()
         }
         override def onUpstreamFailure(ex: Throwable): Unit = {
           log.debug("Pool upstream failed with {}", ex)
