@@ -266,7 +266,7 @@ private[http] object StreamUtils {
       val materializationPromise = Promise[Unit]()
       val killSwitchPromise = Promise[Option[UniqueKillSwitch]]()
       val newSource0 =
-        source.via(Flow.fromGraph(KillSwitches.single[T]).mapMaterializedValue(ks => killSwitchPromise.success(Some(ks))))
+        source.via(Flow.fromGraph(KillSwitches.single[T]).mapMaterializedValue(ks => killSwitchPromise.trySuccess(Some(ks))))
       val (newSource, completion) =
         StreamUtils.captureTermination(newSource0.mapMaterializedValue { mat =>
           materializationPromise.trySuccess(())
