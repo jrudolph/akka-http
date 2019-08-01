@@ -53,6 +53,7 @@ private[http] final class PoolMasterActor extends Actor with ActorLogging {
     val interface = PoolInterfaceActor.create(gateway, context)
     poolStatus += gateway -> PoolInterfaceRunning(interface)
     poolInterfaces += interface -> gateway
+    interface.whenShutdown.onComplete { _ => self ! HasBeenShutdown(interface) }(context.dispatcher)
     interface
     // context.watch(ref) - how to replace that one?
   }
@@ -92,22 +93,7 @@ private[http] final class PoolMasterActor extends Actor with ActorLogging {
           // to this actor by the pool actor, they will be retried once the shutdown
           // has completed.
           val completed = pool.shutdown()(context.dispatcher)
-          shutdownCompletedPromise.completeWith(completed)
-          completed.onComplete { _ =>
-            poolInterfaces.get(pool).foreach { gateway =>
-              poolStatus.get(gateway) match {
-                case Some(PoolInterfaceRunning(_)) =>
-                  log.error("connection pool for {} has shut down unexpectedly", gateway)
-                case Some(PoolInterfaceShuttingDown(shutdownCompletedPromise)) =>
-                  shutdownCompletedPromise.trySuccess(Done)
-                case None =>
-                // This will never happen as poolInterfaces and poolStatus are modified
-                // together. If there is no status then there is no gateway to start with.
-              }
-              poolStatus -= gateway
-              poolInterfaces -= pool
-            }
-          }(context.dispatcher)
+          shutdownCompletedPromise.tryCompleteWith(completed)
           poolStatus += gateway -> PoolInterfaceShuttingDown(shutdownCompletedPromise)
         case PoolInterfaceShuttingDown(formerPromise) =>
           // Pool is already shutting down, mirror the existing promise.
@@ -124,6 +110,21 @@ private[http] final class PoolMasterActor extends Actor with ActorLogging {
         if (remaining.hasNext) remaining.next().onComplete(_ => track(remaining))
         else shutdownCompletedPromise.trySuccess(Done)
       track(poolStatus.keys.map(_.shutdown()).toIterator)
+
+    case HasBeenShutdown(pool) =>
+      poolInterfaces.get(pool).foreach { gateway =>
+        poolStatus.get(gateway) match {
+          case Some(PoolInterfaceRunning(_)) =>
+            log.error("connection pool for {} has shut down unexpectedly", gateway)
+          case Some(PoolInterfaceShuttingDown(shutdownCompletedPromise)) =>
+            shutdownCompletedPromise.trySuccess(Done)
+          case None =>
+          // This will never happen as poolInterfaces and poolStatus are modified
+          // together. If there is no status then there is no gateway to start with.
+        }
+        poolStatus -= gateway
+        poolInterfaces -= pool
+      }
 
     // Testing only.
     case PoolStatus(gateway, statusPromise) =>
@@ -149,6 +150,8 @@ private[http] object PoolMasterActor {
     extends NoSerializationVerificationNeeded
   final case class Shutdown(gateway: PoolGateway, shutdownCompletedPromise: Promise[Done]) extends NoSerializationVerificationNeeded with DeadLetterSuppression
   final case class ShutdownAll(shutdownCompletedPromise: Promise[Done]) extends NoSerializationVerificationNeeded with DeadLetterSuppression
+
+  final case class HasBeenShutdown(interface: PoolInterface) extends NoSerializationVerificationNeeded with DeadLetterSuppression
 
   final case class PoolStatus(gateway: PoolGateway, statusPromise: Promise[Option[PoolInterfaceStatus]]) extends NoSerializationVerificationNeeded
   final case class PoolSize(sizePromise: Promise[Int]) extends NoSerializationVerificationNeeded
