@@ -50,7 +50,7 @@ private[http] final class PoolMasterActor extends Actor with ActorLogging {
     if (poolStatus.contains(gateway)) {
       throw new IllegalStateException(s"pool interface actor for $gateway already exists")
     }
-    val interface = PoolInterfaceActor.create(gateway, context)
+    val interface = PoolInterface.create(gateway, context)
     poolStatus += gateway -> PoolInterfaceRunning(interface)
     poolInterfaces += interface -> gateway
     interface.whenShutdown.onComplete { _ => self ! HasBeenShutdown(interface) }(context.dispatcher)
