@@ -5,6 +5,7 @@
 package akka.http.impl.engine.client
 
 import akka.Done
+import akka.NotUsed
 import akka.actor._
 import akka.pattern.ask
 import akka.event.{ LogSource, Logging, LoggingAdapter }
@@ -26,7 +27,6 @@ import akka.stream.actor.ActorSubscriberMessage._
 import akka.stream.actor.{ ActorPublisher, ActorSubscriber, ZeroRequestStrategy }
 import akka.stream.impl.{ Buffer, SeqActorName }
 import akka.stream.scaladsl.Flow
-import akka.stream.scaladsl.Keep
 import akka.stream.scaladsl.{ Sink, Source }
 import akka.stream.stage.GraphStageLogic
 import akka.stream.stage.GraphStageWithMaterializedValue
@@ -87,8 +87,14 @@ private object PoolInterfaceActor {
         case PoolImplementation.New => NewHostConnectionPool(connectionFlow, settings, log).named("PoolFlow")
       }
 
+    val bufferIfNeeded: Flow[RequestContext, RequestContext, NotUsed] = {
+      val targetBufferSize = settings.maxOpenRequests - settings.maxConnections
+      if (targetBufferSize > 0) Flow[RequestContext].buffer(targetBufferSize, OverflowStrategy.backpressure)
+      else Flow[RequestContext]
+    }
+
     Flow.fromGraph(new PoolInterfaceStage(gateway, log))
-      .buffer((settings.maxOpenRequests - settings.maxConnections) max 0, OverflowStrategy.backpressure) // FIXME: is that accurate enough?
+      .via(bufferIfNeeded)
       .join(poolFlow)
       .run()
   }
@@ -140,7 +146,7 @@ private object PoolInterfaceActor {
 
         }
 
-        override def request(request: HttpRequest, responsePromise: Promise[HttpResponse]): Unit = requestCallback.invoke(request, responsePromise)
+        override def request(request: HttpRequest, responsePromise: Promise[HttpResponse]): Unit = requestCallback.invoke((request, responsePromise))
         override def shutdown()(implicit ec: ExecutionContext): Future[Done] = {
           val promise = Promise[Done]()
           shutdownCallback.invoke(promise)
