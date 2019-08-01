@@ -100,9 +100,10 @@ private[http] object PoolInterface {
         "Please retry the request later. See http://doc.akka.io/docs/akka-http/current/scala/http/client-side/pool-overflow.html for " +
         "more information.")
 
-    override def createLogicAndMaterializedValue(inheritedAttributes: Attributes): (GraphStageLogic, PoolInterface) = {
+    override def createLogicAndMaterializedValue(inheritedAttributes: Attributes): (GraphStageLogic, PoolInterface) = ???
+    override def createLogicAndMaterializedValue(inheritedAttributes: Attributes, _materializer: Materializer): (GraphStageLogic, PoolInterface) = {
       object Logic extends TimerGraphStageLogic(shape) with PoolInterface with InHandler with OutHandler {
-        implicit var ec: ExecutionContext = _
+        import _materializer.executionContext
         import gateway.hcps
 
         val shutdownPromise = Promise[ShutdownReason]()
@@ -113,7 +114,6 @@ private[http] object PoolInterface {
         setHandlers(responseIn, requestOut, this)
 
         override def preStart(): Unit = {
-          ec = materializer.executionContext
           pull(responseIn)
           resetIdleTimer()
         }
