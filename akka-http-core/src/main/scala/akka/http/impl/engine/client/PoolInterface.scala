@@ -33,7 +33,14 @@ import scala.concurrent.Promise
 import scala.concurrent.duration._
 import scala.util.Success
 
+/**
+ * The pool interface is a push style interface to a pool of connections against a single host.
+ */
 private[http] trait PoolInterface {
+  /**
+   * Submit request to pool. After completion the pool will complete the promise with the response.
+   * If the queue in front of the pool is full, the promise will be failed with a BufferOverflowException.
+   */
   def request(request: HttpRequest, responsePromise: Promise[HttpResponse]): Unit
   def shutdown()(implicit ec: ExecutionContext): Future[Done]
   def whenShutdown: Future[Done]
