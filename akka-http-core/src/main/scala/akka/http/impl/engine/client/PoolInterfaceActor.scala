@@ -88,7 +88,7 @@ private object PoolInterfaceActor {
       }
 
     Flow.fromGraph(new PoolInterfaceStage(gateway, log))
-      .buffer((settings.maxOpenRequests - settings.maxConnections) min 0, OverflowStrategy.backpressure) // FIXME: is that accurate enough?
+      .buffer((settings.maxOpenRequests - settings.maxConnections) max 0, OverflowStrategy.backpressure) // FIXME: is that accurate enough?
       .join(poolFlow)
       .run()
   }
