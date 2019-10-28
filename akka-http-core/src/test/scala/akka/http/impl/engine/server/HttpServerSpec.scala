@@ -1464,6 +1464,13 @@ class HttpServerSpec extends AkkaSpec(
       if (maxContentLength < 0) s
       else s.withParserSettings(s.parserSettings.withMaxContentLength(maxContentLength))
     }
+
+    override def shutdownBlueprint(): Unit = {
+      super.shutdownBlueprint()
+      scheduler.timePasses(1.seconds) // needed to make sure that cancellation delays are propagated
+      scheduler.timePasses(1.seconds)
+      scheduler.timePasses(1.seconds)
+    }
   }
   class RequestTimeoutTestSetup(requestTimeout: FiniteDuration) extends TestSetup {
     override def settings = {
