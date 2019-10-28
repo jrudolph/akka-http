@@ -34,29 +34,20 @@ import akka.util.ByteString
 import com.typesafe.config.{ Config, ConfigFactory }
 import com.typesafe.sslconfig.akka.AkkaSSLConfig
 import com.typesafe.sslconfig.ssl.{ SSLConfigSettings, SSLLooseConfig }
-import org.scalatest.{ BeforeAndAfterAll, Matchers, WordSpec }
-import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.concurrent.Eventually.eventually
 
-class ClientServerSpec extends WordSpec with Matchers with BeforeAndAfterAll with ScalaFutures with WithLogCapturing {
-  val testConf: Config = ConfigFactory.parseString("""
-    akka.loglevel = DEBUG
-    akka.loggers = ["akka.http.impl.util.SilenceAllTestEventListener"]
-    akka.stdout-loglevel = ERROR
-    windows-connection-abort-workaround-enabled = auto
-    akka.http.server.request-timeout = infinite
-    akka.http.server.log-unencrypted-network-bytes = 200
-    akka.http.client.log-unencrypted-network-bytes = 200
-                                                   """)
-  implicit val system = ActorSystem(getClass.getSimpleName, testConf)
+class ClientServerSpec extends AkkaSpecWithMaterializer(
+  """windows-connection-abort-workaround-enabled = auto
+     akka.http.server.request-timeout = infinite
+     akka.http.server.log-unencrypted-network-bytes = 200
+     akka.http.client.log-unencrypted-network-bytes = 200""") {
+
   import system.dispatcher
-  implicit val materializer = ActorMaterializer()
-  implicit val patience = PatienceConfig(3.seconds.dilated)
 
   val testConf2: Config =
     ConfigFactory.parseString("akka.stream.materializer.subscription-timeout.timeout = 1 s")
-      .withFallback(testConf)
-  val system2 = ActorSystem(getClass.getSimpleName, testConf2)
+      .withFallback(system.settings.config)
+  val system2 = ActorSystem(getClass.getSimpleName + "-system2", testConf2)
   val materializer2 = ActorMaterializer.create(system2)
 
   "The low-level HTTP infrastructure" should {
@@ -432,15 +423,15 @@ class ClientServerSpec extends WordSpec with Matchers with BeforeAndAfterAll wit
         val bind = Await.result(Http().bindAndHandle(Flow.fromGraph(stage), hostname, port)(materializer2), 1.seconds.dilated)
 
         performValidRequest()
-        assertCounters(0, 1)
+        assertCounters(0, 0)
 
         EventFilter.warning(pattern = "Illegal HTTP message start", occurrences = 1) intercept {
           performFaultyRequest()
-          assertCounters(0, 2)
+          assertCounters(0, 0)
         }
 
         performValidRequest()
-        assertCounters(0, 3)
+        assertCounters(0, 0)
 
         Await.result(bind.unbind(), 1.second.dilated)
       }(materializer2)
@@ -470,7 +461,7 @@ class ClientServerSpec extends WordSpec with Matchers with BeforeAndAfterAll wit
 
         clientOutSub.sendComplete()
         serverIn.expectComplete()
-        serverOutSub.expectCancellation()
+        serverOutSub.sendComplete()
         clientIn.expectComplete()
 
         binding.foreach(_.unbind())
@@ -539,7 +530,7 @@ class ClientServerSpec extends WordSpec with Matchers with BeforeAndAfterAll wit
         clientOutSub.sendComplete()
         serverInSub.request(1)
         serverIn.expectComplete()
-        serverOutSub.expectCancellation()
+        serverOutSub.sendComplete()
         clientInSub.request(1)
         clientIn.expectComplete()
 
@@ -733,7 +724,7 @@ Host: example.com
 
         clientOutSub.sendComplete()
         serverIn.expectComplete()
-        serverOutSub.expectCancellation()
+        serverOutSub.sendComplete()
         clientIn.expectComplete()
 
         binding.foreach(_.unbind())
@@ -764,7 +755,7 @@ Host: example.com
         toStrict(response.entity) shouldEqual HttpEntity("yeah")
 
         serverIn.expectComplete()
-        serverOutSub.expectCancellation()
+        serverOutSub.sendComplete()
         clientIn.expectComplete()
 
         connSourceSub.cancel()
@@ -786,10 +777,7 @@ Host: example.com
     }
   }
 
-  override def afterAll() = {
-    TestKit.shutdownActorSystem(system)
-    TestKit.shutdownActorSystem(system2)
-  }
+  override def beforeTermination() = TestKit.shutdownActorSystem(system2)
 
   class TestSetup {
     val (hostname, port) = SocketUtil.temporaryServerHostnameAndPort()
