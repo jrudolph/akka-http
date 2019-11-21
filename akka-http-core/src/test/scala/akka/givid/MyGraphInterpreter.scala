@@ -686,7 +686,7 @@ import akka.stream.snapshot._
         connection.portState match {
           case InReady | Pushing  => ConnectionSnapshot.ShouldPull
           case OutReady | Pulling => ConnectionSnapshot.ShouldPush
-          case x if (x & (InClosed | OutClosed)) == (InClosed | OutClosed) =>
+          case x if (x & (InClosed | OutClosed)) != 0 =>
             // At least one side of the connection is closed: we show it as closed
             ConnectionSnapshot.Closed
           case _ =>
@@ -718,7 +718,7 @@ import akka.stream.snapshot._
 
   private[this] val snapshotBufferSize = 100
   private[this] var snapshotPos: Int = 0
-  private[this] val snapshotRingBuffer: Array[RunningInterpreter] = new Array[RunningInterpreter](snapshotBufferSize)
+  private[this] val snapshotRingBuffer: Array[RunningInterpreterImpl] = new Array[RunningInterpreterImpl](snapshotBufferSize)
   private[this] var lastSnapshotConnectionId: Int = -1
   private[this] var lastSnapshotLogic: GraphStageLogic = null
   private[this] var lastSnapshotEvent: SnapshotEvent = null
@@ -727,7 +727,7 @@ import akka.stream.snapshot._
     snapshotRingBuffer(snapshotPos % snapshotBufferSize) = toSnapshot.asInstanceOf[RunningInterpreterImpl].copy(history = Nil)
     snapshotPos += 1
   }
-  private[this] def lastSnapshots(): Vector[RunningInterpreter] =
+  private[this] def lastSnapshots(): Vector[RunningInterpreterImpl] =
     snapshotRingBuffer.drop(snapshotPos).filterNot(_ eq null).toVector ++
       snapshotRingBuffer.take(snapshotPos).toVector
 }

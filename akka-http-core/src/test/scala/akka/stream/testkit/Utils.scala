@@ -8,6 +8,7 @@ import akka.actor.{ ActorRef, ActorRefWithCell }
 import akka.stream.Materializer
 import com.typesafe.config.ConfigFactory
 
+import scala.util.Try
 import scala.util.control.NoStackTrace
 
 object Utils {

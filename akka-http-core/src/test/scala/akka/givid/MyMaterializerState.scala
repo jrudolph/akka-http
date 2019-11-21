@@ -212,7 +212,7 @@ private[akka] final case class RunningInterpreterImpl(
   runningLogicsCount: Int,
   stoppedLogics:      immutable.Seq[LogicSnapshot],
   lastEvent:          Option[SnapshotEvent],
-  history:            immutable.Seq[RunningInterpreter]
+  history:            immutable.Seq[RunningInterpreterImpl]
 )
   extends RunningInterpreter
   with HideImpl
