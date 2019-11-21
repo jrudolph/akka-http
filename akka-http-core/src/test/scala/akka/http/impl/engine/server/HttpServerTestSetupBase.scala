@@ -47,6 +47,8 @@ abstract class HttpServerTestSetupBase {
 
     netIn -> netOut
   }
+  netIn.ensureSubscription()
+  netOut.ensureSubscription()
 
   def expectResponseWithWipedDate(expected: String): Unit = {
     val trimmed = expected.stripMarginWithNewline("\r\n")
@@ -75,10 +77,8 @@ abstract class HttpServerTestSetupBase {
 
   def shutdownBlueprint(): Unit = {
     netIn.sendComplete()
-    requests.expectComplete()
-
+    requests.cancel()
     responses.sendComplete()
-    netOut.expectBytes(ByteString("HTT")) // ???
-    netOut.expectComplete()
+    netOut.cancel()
   }
 }
