@@ -128,10 +128,28 @@ object StreamTestKit {
   }
 
   private def appendInterpreterSnapshot(builder: StringBuilder, snapshot: RunningInterpreterImpl): Unit = {
+    if (snapshot.history.nonEmpty) {
+      snapshot.history.zipWithIndex.foreach {
+        case (snap, idx) =>
+          import java.io._
+          val file = new File(f"snaps/snap_$idx%04d.dot")
+          file.getParentFile.mkdirs()
+          val fos = new FileOutputStream(file)
+          val sb = new StringBuilder(2000)
+          appendInterpreterSnapshot(sb, snap)
+          fos.write(sb.mkString.getBytes("utf8"))
+          fos.close()
+      }
+    }
+
     try {
-      builder.append("\ndot format graph for deadlock analysis:\n")
-      builder.append("================================================================\n")
+      //builder.append("\ndot format graph for deadlock analysis:\n")
+      //builder.append("================================================================\n")
       builder.append("digraph waits {\n")
+      //builder.append("  size=\"3000,3000\";\n")
+      builder.append("  graph [splines=false];\n")
+      builder.append("  node [shape=box];\n")
+      builder.append("  edge [len=3];\n")
 
       for (i <- snapshot.logics.indices) {
         val logic = snapshot.logics(i)
@@ -142,12 +160,14 @@ object StreamTestKit {
         val inName = "N" + connection.in.asInstanceOf[LogicSnapshotImpl].index
         val outName = "N" + connection.out.asInstanceOf[LogicSnapshotImpl].index
 
+        println(s"LastEvent: ${snapshot.lastEvent}")
+
         builder.append(s"  $inName -> $outName ")
         connection.state match {
           case ConnectionSnapshot.ShouldPull =>
             builder.append("[label=shouldPull, color=blue];")
           case ConnectionSnapshot.ShouldPush =>
-            builder.append(s"[label=shouldPush, color=red];")
+            builder.append("[label=shouldPush, color=red, dir=back];")
           case ConnectionSnapshot.Closed =>
             builder.append("[style=dotted, label=closed, dir=both];")
           case _ =>
@@ -155,9 +175,29 @@ object StreamTestKit {
         builder.append("\n")
       }
 
-      builder.append("}\n================================================================\n")
-      builder.append(
-        s"// ${snapshot.queueStatus} (running=${snapshot.runningLogicsCount}, shutdown=${snapshot.stoppedLogics.mkString(",")})")
+      def sanitize(str: String): String =
+        (if (str.size > 50) str.take(50) + "..." else str)
+          .replace('\"', '\'')
+
+      snapshot.lastEvent match {
+        case Some(e: SnapshotEvent.ConnectionEvent) =>
+          val connection = e.connection
+          val inName = "N" + connection.in.asInstanceOf[LogicSnapshotImpl].index
+          val outName = "N" + connection.out.asInstanceOf[LogicSnapshotImpl].index
+
+          val attrs: String = e match {
+            case SnapshotEvent.Pull(_)                => "label=pull"
+            case SnapshotEvent.Push(_, value)         => s"""label="push [${sanitize(value.toString)}]", dir=back"""
+            case SnapshotEvent.DownstreamFinish(_)    => "label=cancel"
+            case SnapshotEvent.UpstreamFinish(_)      => "label=complete, dir=back"
+            case SnapshotEvent.UpstreamFailure(_, ex) => s"""label="fail [${sanitize(ex.toString)}]", dir=back"""
+          }
+          builder.append(s"  $inName -> $outName [color=green, penwidth=5, $attrs];\n")
+        case _ =>
+      }
+      builder.append("}\n")
+      //builder.append("}\n================================================================\n")
+      //builder.append(s"// ${snapshot.queueStatus} (running=${snapshot.runningLogicsCount}, shutdown=${snapshot.stoppedLogics.mkString(",")})")
       builder.toString()
     } catch {
       case _: NoSuchElementException => builder.append("Not all logics has a stage listed, cannot create graph")

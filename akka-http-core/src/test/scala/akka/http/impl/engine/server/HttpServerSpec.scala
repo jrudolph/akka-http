@@ -718,9 +718,9 @@ class HttpServerSpec extends AkkaSpec(
       }
 
       // client then closes the connection
-      netIn.sendComplete()
-      requests.expectComplete()
-      netOut.expectComplete()
+      //netIn.sendComplete()
+      /*requests.expectComplete()
+      netOut.expectComplete()*/
     })
 
     "not fail with 'Cannot pull port (ControllerStage.requestParsingIn) twice' for early response to `100 Continue` request (after 100-Continue has been sent)" inWithShutdown (new TestSetup {
