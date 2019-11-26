@@ -170,6 +170,8 @@ object ConnectionSnapshot {
   sealed trait ConnectionState
   case object ShouldPull extends ConnectionState
   case object ShouldPush extends ConnectionState
+  case object Pulling extends ConnectionState
+  case object Pushing extends ConnectionState
   case object Closed extends ConnectionState
 }
 

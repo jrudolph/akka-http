@@ -10,6 +10,7 @@ import akka.actor.{ ActorRef, ActorSystem }
 import akka.annotation.InternalApi
 import akka.stream._
 import akka.stream.impl.{ PhasedFusingActorMaterializer, StreamSupervisor }
+import akka.stream.snapshot.SnapshotEvent.ConnectionEvent
 import akka.stream.snapshot._
 import akka.testkit.TestProbe
 
@@ -127,6 +128,8 @@ object StreamTestKit {
     builder.toString()
   }
 
+  implicit def LogicImplAccess(logic: LogicSnapshot): LogicSnapshotImpl = logic.asInstanceOf[LogicSnapshotImpl]
+
   private def appendInterpreterSnapshot(builder: StringBuilder, snapshot: RunningInterpreterImpl): Unit = {
     if (snapshot.history.nonEmpty) {
       snapshot.history.zipWithIndex.foreach {
@@ -146,30 +149,57 @@ object StreamTestKit {
       //builder.append("\ndot format graph for deadlock analysis:\n")
       //builder.append("================================================================\n")
       builder.append("digraph waits {\n")
-      //builder.append("  size=\"3000,3000\";\n")
-      builder.append("  graph [splines=false];\n")
-      builder.append("  node [shape=box];\n")
-      builder.append("  edge [len=3];\n")
 
       for (i <- snapshot.logics.indices) {
         val logic = snapshot.logics(i)
-        builder.append(s"""  N$i [label="${logic.label}"];""").append('\n')
+
+        def activeFor(e: SnapshotEvent): Int = e match {
+          case l: SnapshotEvent.LogicEvent       => l.logic.index
+          case p: SnapshotEvent.Pull             => p.connection.out.index
+          case p: SnapshotEvent.DownstreamFinish => p.connection.out.index
+          case p: SnapshotEvent.Push             => p.connection.in.index
+          case p: SnapshotEvent.UpstreamFinish   => p.connection.in.index
+          case p: SnapshotEvent.UpstreamFailure  => p.connection.in.index
+        }
+        val (extraArgs: String, extraLabel: String) =
+          snapshot.lastEvent match {
+            case Some(e: SnapshotEvent) if activeFor(e) == logic.index =>
+              (""", color=blue, bgcolor="#cccccc"""", "")
+            case _ => ("", "")
+          }
+
+        builder.append(s"""  N$i [label="${logic.label}$extraLabel"$extraArgs];""").append('\n')
       }
 
       for (connection <- snapshot.connections) {
-        val inName = "N" + connection.in.asInstanceOf[LogicSnapshotImpl].index
-        val outName = "N" + connection.out.asInstanceOf[LogicSnapshotImpl].index
+        val inName = "N" + connection.in.index
+        val outName = "N" + connection.out.index
 
-        println(s"LastEvent: ${snapshot.lastEvent}")
+        val extraArgs: String =
+          snapshot.lastEvent match {
+            case Some(e: ConnectionEvent) if e.connection.asInstanceOf[ConnectionSnapshotImpl].id == connection.asInstanceOf[ConnectionSnapshotImpl].id =>
+              (e match {
+                case SnapshotEvent.Pull(_)                => ", label=pull"
+                case SnapshotEvent.Push(_, value)         => s""", label="push [${sanitize(value.toString)}]""""
+                case SnapshotEvent.DownstreamFinish(_)    => ", label=cancel"
+                case SnapshotEvent.UpstreamFinish(_)      => ", label=complete"
+                case SnapshotEvent.UpstreamFailure(_, ex) => s""", label="fail [${sanitize(ex.toString)}]""""
+              }) + ", color=blue, penwidth=2"
+            case _ => ""
+          }
 
-        builder.append(s"  $inName -> $outName ")
+        builder.append(s"  $outName -> $inName ")
         connection.state match {
           case ConnectionSnapshot.ShouldPull =>
-            builder.append("[label=shouldPull, color=blue];")
+            builder.append(s"[arrowhead=tee$extraArgs];")
           case ConnectionSnapshot.ShouldPush =>
-            builder.append("[label=shouldPush, color=red, dir=back];")
+            builder.append(s"[arrowhead=empty$extraArgs];")
+          case ConnectionSnapshot.Pulling =>
+            builder.append(s"[arrowtail=tee, arrowhead=empty $extraArgs];")
+          case ConnectionSnapshot.Pushing =>
+            builder.append(s"[arrowhead=normal$extraArgs];")
           case ConnectionSnapshot.Closed =>
-            builder.append("[style=dotted, label=closed, dir=both];")
+            builder.append(s"[arrowhead=empty, style=dotted$extraArgs];")
           case _ =>
         }
         builder.append("\n")
@@ -179,7 +209,7 @@ object StreamTestKit {
         (if (str.size > 50) str.take(50) + "..." else str)
           .replace('\"', '\'')
 
-      snapshot.lastEvent match {
+      /*snapshot.lastEvent match {
         case Some(e: SnapshotEvent.ConnectionEvent) =>
           val connection = e.connection
           val inName = "N" + connection.in.asInstanceOf[LogicSnapshotImpl].index
@@ -194,7 +224,7 @@ object StreamTestKit {
           }
           builder.append(s"  $inName -> $outName [color=green, penwidth=5, $attrs];\n")
         case _ =>
-      }
+      }*/
       builder.append("}\n")
       //builder.append("}\n================================================================\n")
       //builder.append(s"// ${snapshot.queueStatus} (running=${snapshot.runningLogicsCount}, shutdown=${snapshot.stoppedLogics.mkString(",")})")

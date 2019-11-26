@@ -484,16 +484,19 @@ import akka.stream.snapshot._
     //   PUSH
     if ((code & (Pushing | InClosed | OutClosed)) == Pushing) {
       lastSnapshotEvent = SnapshotEvent.Push(null, connection.slot)
+      recordSnapshot()
       processPush(connection)
 
       // PULL
     } else if ((code & (Pulling | OutClosed | InClosed)) == Pulling) {
       lastSnapshotEvent = SnapshotEvent.Pull(null)
+      recordSnapshot()
       processPull(connection)
 
       // CANCEL
     } else if ((code & (OutClosed | InClosed)) == InClosed) {
       lastSnapshotEvent = SnapshotEvent.DownstreamFinish(null)
+      recordSnapshot()
       activeStage = connection.outOwner
       if (Debug)
         println(
@@ -514,9 +517,11 @@ import akka.stream.snapshot._
         completeConnection(connection.inOwner.stageId)
         if ((connection.portState & InFailed) == 0) {
           lastSnapshotEvent = SnapshotEvent.UpstreamFinish(null)
+          recordSnapshot()
           connection.inHandler.onUpstreamFinish()
         } else {
           lastSnapshotEvent = SnapshotEvent.UpstreamFailure(null, connection.slot.asInstanceOf[Failed].ex)
+          recordSnapshot()
           connection.inHandler.onUpstreamFailure(connection.slot.asInstanceOf[Failed].ex)
         }
       } else {
@@ -526,8 +531,6 @@ import akka.stream.snapshot._
       }
 
     }
-
-    recordSnapshot()
   }
 
   private def processPush(connection: Connection): Unit = {
@@ -684,8 +687,10 @@ import akka.stream.snapshot._
         logicSnapshots(logicIndexes(connection.inOwner)),
         logicSnapshots(logicIndexes(connection.outOwner)),
         connection.portState match {
-          case InReady | Pushing  => ConnectionSnapshot.ShouldPull
-          case OutReady | Pulling => ConnectionSnapshot.ShouldPush
+          case InReady  => ConnectionSnapshot.ShouldPull
+          case OutReady => ConnectionSnapshot.ShouldPush
+          case Pushing  => ConnectionSnapshot.Pushing
+          case Pulling  => ConnectionSnapshot.Pulling
           case x if (x & (InClosed | OutClosed)) != 0 =>
             // At least one side of the connection is closed: we show it as closed
             ConnectionSnapshot.Closed
