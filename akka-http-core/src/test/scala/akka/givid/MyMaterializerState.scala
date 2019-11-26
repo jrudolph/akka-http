@@ -125,34 +125,21 @@ sealed trait RunningInterpreter extends InterpreterSnapshot {
 
 sealed trait SnapshotEvent
 object SnapshotEvent {
-  sealed trait ConnectionEvent extends SnapshotEvent {
-    def connection: ConnectionSnapshot
-    def withConnection(newConnection: ConnectionSnapshot): ConnectionEvent
-  }
-  sealed trait LogicEvent extends SnapshotEvent {
-    def logic: LogicSnapshot
-    def withLogic(newLogic: LogicSnapshot): LogicEvent
-  }
+  sealed trait Signal
+  case object Pull extends Signal
+  final case class Push(data: Any) extends Signal
+  case object Complete extends Signal
+  final case class Failure(cause: Throwable) extends Signal
+  case object Cancel extends Signal
+  final case class AsyncCallback(data: Any) extends Signal
 
-  final case class Pull(connection: ConnectionSnapshot) extends ConnectionEvent {
-    override def withConnection(newConnection: ConnectionSnapshot): ConnectionEvent = copy(connection = newConnection)
-  }
-  final case class Push(connection: ConnectionSnapshot, data: Any) extends ConnectionEvent {
-    override def withConnection(newConnection: ConnectionSnapshot): ConnectionEvent = copy(connection = newConnection)
-  }
-  final case class UpstreamFinish(connection: ConnectionSnapshot) extends ConnectionEvent {
-    override def withConnection(newConnection: ConnectionSnapshot): ConnectionEvent = copy(connection = newConnection)
-  }
-  final case class UpstreamFailure(connection: ConnectionSnapshot, cause: Throwable) extends ConnectionEvent {
-    override def withConnection(newConnection: ConnectionSnapshot): ConnectionEvent = copy(connection = newConnection)
-  }
-  final case class DownstreamFinish(connection: ConnectionSnapshot) extends ConnectionEvent {
-    override def withConnection(newConnection: ConnectionSnapshot): ConnectionEvent = copy(connection = newConnection)
-  }
+  sealed trait ConnectionOrLogicSignal
+  final case class ConnectionSignal(connectionId: Int, signal: Signal) extends ConnectionOrLogicSignal
+  final case class LogicSignal(logicId: Int, signal: Signal) extends ConnectionOrLogicSignal
 
-  case class AsyncCallback(logic: LogicSnapshot, data: Any) extends LogicEvent {
-    override def withLogic(newLogic: LogicSnapshot): LogicEvent = copy(logic = newLogic)
-  }
+  final case class TriggeredSignal(signal: ConnectionOrLogicSignal) extends SnapshotEvent
+  final case class StartProcessing(logicId: Int, signal: ConnectionOrLogicSignal) extends SnapshotEvent
+  final case class EndProcessing(logicId: Int, signal: ConnectionOrLogicSignal) extends SnapshotEvent
 }
 
 /**
@@ -208,6 +195,8 @@ private[akka] final case class UninitializedInterpreterImpl(logics: immutable.Se
  */
 @InternalApi
 private[akka] final case class RunningInterpreterImpl(
+  timestampNanos:     Long,
+  step:               Long,
   logics:             immutable.Seq[LogicSnapshot],
   connections:        immutable.Seq[ConnectionSnapshot],
   queueStatus:        String,

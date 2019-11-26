@@ -16,8 +16,6 @@ import akka.annotation.InternalApi
 import scala.concurrent.Promise
 import scala.util.control.NonFatal
 import akka.stream.Attributes.LogLevels
-import akka.stream.snapshot.SnapshotEvent.ConnectionEvent
-import akka.stream.snapshot.SnapshotEvent.LogicEvent
 import akka.stream.snapshot._
 
 /**
@@ -445,16 +443,17 @@ import akka.stream.snapshot._
   def runAsyncInput(logic: GraphStageLogic, evt: Any, promise: Promise[Done], handler: (Any) => Unit): Unit =
     if (!isStageCompleted(logic)) {
       if (GraphInterpreter.Debug) println(s"$Name ASYNC $evt ($handler) [$logic]")
-      lastSnapshotEvent = SnapshotEvent.AsyncCallback(null, evt)
-      lastSnapshotLogic = logic
 
       val currentInterpreterHolder = _currentInterpreter.get()
       val previousInterpreter = currentInterpreterHolder(0)
       currentInterpreterHolder(0) = this
       try {
+
         activeStage = logic
         try {
-          handler(evt)
+          wrapHandler(logic.stageId, SnapshotEvent.LogicSignal(logic.stageId, SnapshotEvent.AsyncCallback(evt))) {
+            handler(evt)
+          }
           if (promise ne GraphStageLogic.NoPromise) {
             promise.success(Done)
             logic.onFeedbackDispatched()
@@ -477,33 +476,28 @@ import akka.stream.snapshot._
     // this must be the state after returning without delivering any signals, to avoid double-finalization of some unlucky stage
     // (this can happen if a stage completes voluntarily while connection close events are still queued)
     activeStage = null
-    lastSnapshotConnectionId = connection.id
     val code = connection.portState
 
     // Manual fast decoding, fast paths are PUSH and PULL
     //   PUSH
     if ((code & (Pushing | InClosed | OutClosed)) == Pushing) {
-      lastSnapshotEvent = SnapshotEvent.Push(null, connection.slot)
-      recordSnapshot()
       processPush(connection)
 
       // PULL
     } else if ((code & (Pulling | OutClosed | InClosed)) == Pulling) {
-      lastSnapshotEvent = SnapshotEvent.Pull(null)
-      recordSnapshot()
       processPull(connection)
 
       // CANCEL
     } else if ((code & (OutClosed | InClosed)) == InClosed) {
-      lastSnapshotEvent = SnapshotEvent.DownstreamFinish(null)
-      recordSnapshot()
       activeStage = connection.outOwner
       if (Debug)
         println(
           s"$Name CANCEL ${inOwnerName(connection)} -> ${outOwnerName(connection)} (${connection.outHandler}) [${outLogicName(connection)}]")
       connection.portState |= OutClosed
       completeConnection(connection.outOwner.stageId)
-      connection.outHandler.onDownstreamFinish()
+      wrapHandler(connection.outOwner.stageId, SnapshotEvent.ConnectionSignal(connection.id, SnapshotEvent.Cancel)) {
+        connection.outHandler.onDownstreamFinish()
+      }
     } else if ((code & (OutClosed | InClosed)) == OutClosed) {
       // COMPLETIONS
 
@@ -516,13 +510,14 @@ import akka.stream.snapshot._
         activeStage = connection.inOwner
         completeConnection(connection.inOwner.stageId)
         if ((connection.portState & InFailed) == 0) {
-          lastSnapshotEvent = SnapshotEvent.UpstreamFinish(null)
-          recordSnapshot()
-          connection.inHandler.onUpstreamFinish()
+          wrapHandler(connection.inOwner.stageId, SnapshotEvent.ConnectionSignal(connection.id, SnapshotEvent.Complete)) {
+            connection.inHandler.onUpstreamFinish()
+          }
         } else {
-          lastSnapshotEvent = SnapshotEvent.UpstreamFailure(null, connection.slot.asInstanceOf[Failed].ex)
-          recordSnapshot()
-          connection.inHandler.onUpstreamFailure(connection.slot.asInstanceOf[Failed].ex)
+          val cause = connection.slot.asInstanceOf[Failed].ex
+          wrapHandler(connection.inOwner.stageId, SnapshotEvent.ConnectionSignal(connection.id, SnapshotEvent.Failure(cause))) {
+            connection.inHandler.onUpstreamFailure(cause)
+          }
         }
       } else {
         // Push is pending, first process push, then re-enqueue closing event
@@ -539,7 +534,9 @@ import akka.stream.snapshot._
         s"$Name PUSH ${outOwnerName(connection)} -> ${inOwnerName(connection)}, ${connection.slot} (${connection.inHandler}) [${inLogicName(connection)}]")
     activeStage = connection.inOwner
     connection.portState ^= PushEndFlip
-    connection.inHandler.onPush()
+    wrapHandler(connection.inOwner.stageId, SnapshotEvent.ConnectionSignal(connection.id, SnapshotEvent.Push(connection.slot))) {
+      connection.inHandler.onPush()
+    }
   }
 
   private def processPull(connection: Connection): Unit = {
@@ -548,7 +545,9 @@ import akka.stream.snapshot._
         s"$Name PULL ${inOwnerName(connection)} -> ${outOwnerName(connection)} (${connection.outHandler}) [${outLogicName(connection)}]")
     activeStage = connection.outOwner
     connection.portState ^= PullEndFlip
-    connection.outHandler.onPull()
+    wrapHandler(connection.outOwner.stageId, SnapshotEvent.ConnectionSignal(connection.id, SnapshotEvent.Pull)) {
+      connection.outHandler.onPull()
+    }
   }
 
   private def dequeue(): Connection = {
@@ -604,6 +603,7 @@ import akka.stream.snapshot._
   }
 
   private[stream] def chasePush(connection: Connection): Unit = {
+    recordSnapshotEvent(SnapshotEvent.TriggeredSignal(SnapshotEvent.ConnectionSignal(connection.id, SnapshotEvent.Push(connection.slot))))
     if (chaseCounter > 0 && chasedPush == NoEvent) {
       chaseCounter -= 1
       chasedPush = connection
@@ -611,6 +611,7 @@ import akka.stream.snapshot._
   }
 
   private[stream] def chasePull(connection: Connection): Unit = {
+    recordSnapshotEvent(SnapshotEvent.TriggeredSignal(SnapshotEvent.ConnectionSignal(connection.id, SnapshotEvent.Pull)))
     if (chaseCounter > 0 && chasedPull == NoEvent) {
       chaseCounter -= 1
       chasedPull = connection
@@ -618,6 +619,7 @@ import akka.stream.snapshot._
   }
 
   private[stream] def complete(connection: Connection): Unit = {
+    recordSnapshotEvent(SnapshotEvent.TriggeredSignal(SnapshotEvent.ConnectionSignal(connection.id, SnapshotEvent.Complete)))
     val currentState = connection.portState
     if (Debug) println(s"$Name   complete($connection) [$currentState]")
     connection.portState = currentState | OutClosed
@@ -632,6 +634,7 @@ import akka.stream.snapshot._
   }
 
   private[stream] def fail(connection: Connection, ex: Throwable): Unit = {
+    recordSnapshotEvent(SnapshotEvent.TriggeredSignal(SnapshotEvent.ConnectionSignal(connection.id, SnapshotEvent.Failure(ex))))
     val currentState = connection.portState
     if (Debug) println(s"$Name   fail($connection, $ex) [$currentState]")
     connection.portState = currentState | OutClosed
@@ -650,6 +653,7 @@ import akka.stream.snapshot._
   }
 
   private[stream] def cancel(connection: Connection): Unit = {
+    recordSnapshotEvent(SnapshotEvent.TriggeredSignal(SnapshotEvent.ConnectionSignal(connection.id, SnapshotEvent.Cancel)))
     val currentState = connection.portState
     if (Debug) println(s"$Name   cancel($connection) [$currentState]")
     connection.portState = currentState | InClosed
@@ -666,6 +670,8 @@ import akka.stream.snapshot._
     if ((currentState & InClosed) == 0) completeConnection(connection.inOwner.stageId)
   }
 
+  def toSnapshot: RunningInterpreter = toSnapshot(None)
+
   /**
    * Debug utility to dump the "waits-on" relationships in an AST format for rendering in some suitable format for
    * analysis of deadlocks.
@@ -673,7 +679,7 @@ import akka.stream.snapshot._
    * Only invoke this after the interpreter completely settled, otherwise the results might be off. This is a very
    * simplistic tool, make sure you are understanding what you are doing and then it will serve you well.
    */
-  def toSnapshot: RunningInterpreter = {
+  private def toSnapshot(lastEvent: Option[SnapshotEvent]): RunningInterpreter = {
 
     val logicSnapshots = logics.zipWithIndex.map {
       case (logic, idx) =>
@@ -705,13 +711,9 @@ import akka.stream.snapshot._
       case (activeConnections, idx) if activeConnections < 1 => logicSnapshots(idx)
     }.toList
 
-    val lastEvent = lastSnapshotEvent match {
-      case null               => None
-      case e: ConnectionEvent => Some(e.withConnection(connectionSnapshots.find(_.id == lastSnapshotConnectionId).get))
-      case e: LogicEvent      => Some(e.withLogic(logicSnapshots(logicIndexes(lastSnapshotLogic))))
-    }
-
     RunningInterpreterImpl(
+      System.nanoTime(),
+      snapshotPos,
       logicSnapshots.toVector,
       connectionSnapshots.toVector,
       queueStatus,
@@ -721,15 +723,19 @@ import akka.stream.snapshot._
       lastSnapshots())
   }
 
-  private[this] val snapshotBufferSize = 100
+  private[this] val snapshotBufferSize = 1000
   private[this] var snapshotPos: Int = 0
   private[this] val snapshotRingBuffer: Array[RunningInterpreterImpl] = new Array[RunningInterpreterImpl](snapshotBufferSize)
-  private[this] var lastSnapshotConnectionId: Int = -1
-  private[this] var lastSnapshotLogic: GraphStageLogic = null
-  private[this] var lastSnapshotEvent: SnapshotEvent = null
 
-  private def recordSnapshot(): Unit = {
-    snapshotRingBuffer(snapshotPos % snapshotBufferSize) = toSnapshot.asInstanceOf[RunningInterpreterImpl].copy(history = Nil)
+  private def wrapHandler[T](logicId: Int, signal: SnapshotEvent.ConnectionOrLogicSignal)(body: => T): T = {
+    recordSnapshotEvent(SnapshotEvent.StartProcessing(logicId, signal))
+    val res = body
+    recordSnapshotEvent(SnapshotEvent.EndProcessing(logicId, signal))
+    res
+  }
+
+  private def recordSnapshotEvent(event: SnapshotEvent): Unit = {
+    snapshotRingBuffer(snapshotPos % snapshotBufferSize) = toSnapshot(Some(event)).asInstanceOf[RunningInterpreterImpl].copy(history = Nil)
     snapshotPos += 1
   }
   private[this] def lastSnapshots(): Vector[RunningInterpreterImpl] =
