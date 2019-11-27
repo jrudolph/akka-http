@@ -132,8 +132,8 @@ object StreamTestKit {
   implicit def LogicImplAccess(logic: LogicSnapshot): LogicSnapshotImpl = logic.asInstanceOf[LogicSnapshotImpl]
   implicit def ConnectionImplAccess(conn: ConnectionSnapshot): ConnectionSnapshotImpl = conn.asInstanceOf[ConnectionSnapshotImpl]
 
-  private def appendInterpreterSnapshot(builder: StringBuilder, snapshot: RunningInterpreterImpl): Unit = {
-    if (snapshot.history.nonEmpty) {
+  private[akka] def appendInterpreterSnapshot(builder: StringBuilder, snapshot: RunningInterpreterImpl): Unit = {
+    if (snapshot.history.nonEmpty) try {
       import java.io._
 
       snapshot.history.zipWithIndex.foreach {
@@ -158,37 +158,52 @@ object StreamTestKit {
         events.foreach(println)
 
         def eventCausations(): Seq[(Int, Int)] = {
-          case class State(currentlyHandling: Int, waitingForExecution: Map[ConnectionOrLogicSignal, Int], edges: Vector[(Int, Int)]) {
-            require(edges.lastOption.forall(x => !events(x._2)._1.isInstanceOf[EndProcessing]))
+          case class State(
+            currentlyHandling:   Int,
+            last:                Int,
+            waitingForExecution: Map[ConnectionOrLogicSignal, Int],
+            lastEnded:           Map[Int, Int],
+            edges:               Vector[(Int, Int)]) {
+            //require(edges.lastOption.forall(x => !events(x._2)._1.isInstanceOf[EndProcessing]))
             require(currentlyHandling == -1 || events(currentlyHandling)._1.isInstanceOf[StartProcessing])
 
             def handle(event: SnapshotEvent, idx: Int): State = event match {
               case StartProcessing(logicId, signal) => startHandling(logicId, signal, idx)
-              case EndProcessing(logicId, signal)   => stopHandling()
+              case EndProcessing(logicId, _)        => stopHandling(logicId, idx)
               case TriggeredSignal(signal)          => triggered(signal, idx)
             }
 
-            def startHandling(nextHandling: Int, signal: ConnectionOrLogicSignal, eventId: Int): State = {
+            def startHandling(logicId: Int, signal: ConnectionOrLogicSignal, eventId: Int): State = {
               require(currentlyHandling == -1)
-              val redeemed = waitingForExecution(signal)
+              val newEdges =
+                waitingForExecution.get(signal).map(n => eventId -> n).toSeq ++
+                  lastEnded.get(logicId).map(n => eventId -> n).toSeq
+
               copy(
                 currentlyHandling = eventId,
+                last = eventId,
                 waitingForExecution = waitingForExecution - signal,
-                edges = edges :+ (eventId -> redeemed))
+                edges = edges ++ newEdges)
             }
-            def stopHandling(): State = {
+            def stopHandling(logicId: Int, idx: Int): State = {
+              //require(logicId == currentlyHandling, s"Expected logic $currentlyHandling but got $logicId at idx $idx")
               require(currentlyHandling > -1)
-              copy(currentlyHandling = -1)
+              copy(
+                currentlyHandling = -1,
+                last = idx,
+                lastEnded = lastEnded + (logicId -> idx),
+                edges = edges :+ (idx -> last))
             }
             def triggered(signal: ConnectionOrLogicSignal, idx: Int): State = {
-              val newEdges = if (currentlyHandling == -1) edges else edges :+ (idx -> currentlyHandling)
+              val newEdges = if (currentlyHandling == -1) edges else edges :+ (idx -> last)
               copy(
+                last = idx,
                 waitingForExecution = waitingForExecution + (signal -> idx),
                 edges = newEdges)
             }
           }
 
-          events.foldLeft(State(-1, Map.empty, Vector.empty)) { (lastState, nextEvent) =>
+          events.foldLeft(State(-1, -1, Map.empty, Map.empty, Vector.empty)) { (lastState, nextEvent) =>
             val (event, idx) = nextEvent
             lastState.handle(event, idx)
           }.edges
@@ -212,7 +227,7 @@ object StreamTestKit {
             }
 
             s"${signalString(signal)} ${logicString(target)} from ${logicString(origin)}"
-          case LogicSignal(logicId, signal) => ???
+          case LogicSignal(logicId, signal) => s"${signalString(signal)} ${logicString(logicId)}"
         }
         def logicString(logicId: Int): String = snapshot.logics.find(_.index == logicId).get.label
         def eventString(evt: SnapshotEvent): String = evt match {
@@ -221,7 +236,7 @@ object StreamTestKit {
           case EndProcessing(logicId, signal)   => s"END  ${logicString(logicId)} ${csignalString(signal)}"
         }
         def connectOpenEnds(): Seq[(Int, Int)] = {
-          val eventIds = events.filterNot(_._1.isInstanceOf[EndProcessing]).map(_._2)
+          val eventIds = events. /*filterNot(_._1.isInstanceOf[EndProcessing]).*/ map(_._2)
           val withoutCause = eventIds.filter(e => !causes.exists(_._1 == e))
           val withoutEffect = eventIds.filter(e => !causes.exists(_._2 == e))
 
@@ -239,7 +254,7 @@ object StreamTestKit {
 
         sb.append("digraph causes {\n")
         events
-          .filterNot(_._1.isInstanceOf[EndProcessing])
+          //.filterNot(_._1.isInstanceOf[EndProcessing])
           .foreach {
             case (evt, idx) =>
               sb.append(s"""  E$idx [label="${eventString(evt)}"];\n""")
@@ -258,6 +273,9 @@ object StreamTestKit {
         fos.write(sb.mkString.getBytes("utf8"))
         fos.close()
       }
+    } catch {
+      case NonFatal(ex) =>
+        ex.printStackTrace()
     }
 
     try {

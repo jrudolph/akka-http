@@ -695,7 +695,7 @@ class HttpServerSpec extends AkkaSpec(
       netOut.expectComplete()
     })
 
-    "render a closing response instead of `100 Continue` if request entity is not requested" inWithShutdown (new TestSetup {
+    "render a closing response instead of `100 Continue` if request entity is not requested" in assertAllStagesStopped(new TestSetup {
       send(
         """POST / HTTP/1.1
              |Host: example.com
@@ -719,6 +719,7 @@ class HttpServerSpec extends AkkaSpec(
 
       // client then closes the connection
       //netIn.sendComplete()
+      //fail()
       /*requests.expectComplete()
       netOut.expectComplete()*/
     })

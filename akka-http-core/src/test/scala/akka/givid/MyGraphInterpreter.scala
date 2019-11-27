@@ -17,6 +17,7 @@ import scala.concurrent.Promise
 import scala.util.control.NonFatal
 import akka.stream.Attributes.LogLevels
 import akka.stream.snapshot._
+import akka.stream.testkit.scaladsl.StreamTestKit
 
 /**
  * INTERNAL API
@@ -576,6 +577,9 @@ import akka.stream.snapshot._
     if (isStageCompleted(logic)) {
       runningStages -= 1
       finalizeStage(logic)
+
+      if (runningStages == 0)
+        StreamTestKit.appendInterpreterSnapshot(new StringBuilder, toSnapshot.asInstanceOf[RunningInterpreterImpl])
     }
 
   // Returns true if the given stage is already completed
@@ -723,7 +727,7 @@ import akka.stream.snapshot._
       lastSnapshots())
   }
 
-  private[this] val snapshotBufferSize = 1000
+  private[this] val snapshotBufferSize = 10000
   private[this] var snapshotPos: Int = 0
   private[this] val snapshotRingBuffer: Array[RunningInterpreterImpl] = new Array[RunningInterpreterImpl](snapshotBufferSize)
 
