@@ -327,13 +327,13 @@ class RequestRendererSpec extends AnyFreeSpec with Matchers with BeforeAndAfterA
   class TestSetup(
     val userAgent: Option[`User-Agent`] = Some(`User-Agent`("akka-http/1.0.0")),
     serverAddress: InetSocketAddress    = new InetSocketAddress("test.com", 8080))
-    extends HttpRequestRendererFactory(userAgent, requestHeaderSizeHint = 64, NoLogging) {
+    extends HttpRequestRendererFactory(userAgent, Host(serverAddress), requestHeaderSizeHint = 64, NoLogging) {
 
     def awaitAtMost: FiniteDuration = 4.seconds.dilated
 
     def renderTo(expected: String): Matcher[HttpRequest] =
       equal(expected.stripMarginWithNewline("\r\n")).matcher[String] compose { request =>
-        val byteStringSource = renderToSource(RequestRenderingContext(request, Host(serverAddress)))
+        val byteStringSource = renderToSource(RequestRenderingContext(request))
         val future = byteStringSource.limit(1000).runWith(Sink.seq).map(_.reduceLeft(_ ++ _).utf8String)
         Await.result(future, awaitAtMost)
       }

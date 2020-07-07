@@ -66,7 +66,7 @@ private[http] object OutgoingConnectionBlueprint {
         Flow[HttpRequest] map { request =>
           val sendEntityTrigger =
             request.headers collectFirst { case headers.Expect.`100-continue` => Promise[NotUsed]().future }
-          RequestRenderingContext(request, hostHeader, sendEntityTrigger)
+          RequestRenderingContext(request, sendEntityTrigger)
         }
       }
 
@@ -75,7 +75,7 @@ private[http] object OutgoingConnectionBlueprint {
       val terminationMerge = b.add(TerminationMerge)
 
       val requestRendering: Flow[RequestRenderingContext, ByteString, NotUsed] = {
-        val requestRendererFactory = new HttpRequestRendererFactory(userAgentHeader, requestHeaderSizeHint, log)
+        val requestRendererFactory = new HttpRequestRendererFactory(userAgentHeader, hostHeader, requestHeaderSizeHint, log)
         Flow[RequestRenderingContext]
           .map(requestRendererFactory.render)
           .via(RenderSupport.concatRenderOutput)

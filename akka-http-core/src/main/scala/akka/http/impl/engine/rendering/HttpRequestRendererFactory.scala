@@ -26,16 +26,15 @@ import headers._
 @InternalApi
 private[http] class HttpRequestRendererFactory(
   userAgentHeader:       Option[headers.`User-Agent`],
+  hostHeader:            Host,
   requestHeaderSizeHint: Int,
   log:                   LoggingAdapter) {
   import HttpRequestRendererFactory.RequestRenderingOutput
 
   private val userAgentHeaderByteString: ByteString =
-    userAgentHeader.fold(ByteString.empty)(header =>
-      (new ByteStringRendering(1000)
-        ~~ header
-        ~~ CrLf).get
-    )
+    userAgentHeader.fold(ByteString.empty)(header => ByteStringRendering.render(_ ~~ header ~~ CrLf))
+  private val hostHeaderByteString: ByteString =
+    ByteStringRendering.render(_ ~~ hostHeader ~~ CrLf)
 
   def renderToSource(ctx: RequestRenderingContext): Source[ByteString, Any] = render(ctx).byteStream
 
@@ -114,7 +113,7 @@ private[http] class HttpRequestRendererFactory(
         }
 
         case Nil =>
-          if (!hostHeaderSeen) r ~~ ctx.hostHeader ~~ CrLf
+          if (!hostHeaderSeen) r ~~ hostHeaderByteString
           if (!userAgentSeen && userAgentHeader.isDefined) r ~~ userAgentHeaderByteString
           if (entity.isChunked && !entity.isKnownEmpty && !transferEncodingSeen)
             r ~~ `Transfer-Encoding` ~~ ChunkedBytes ~~ CrLf
@@ -169,8 +168,8 @@ private[http] class HttpRequestRendererFactory(
 }
 
 private[http] object HttpRequestRendererFactory {
-  def renderStrict(ctx: RequestRenderingContext, settings: ClientConnectionSettings, log: LoggingAdapter): ByteString =
-    new HttpRequestRendererFactory(settings.userAgentHeader, settings.requestHeaderSizeHint, log).renderStrict(ctx)
+  def renderStrict(ctx: RequestRenderingContext, hostHeader: Host, settings: ClientConnectionSettings, log: LoggingAdapter): ByteString =
+    new HttpRequestRendererFactory(settings.userAgentHeader, hostHeader, settings.requestHeaderSizeHint, log).renderStrict(ctx)
 
   sealed trait RequestRenderingOutput {
     def byteStream: Source[ByteString, Any]
@@ -195,5 +194,4 @@ private[http] object HttpRequestRendererFactory {
 @InternalApi
 private[http] final case class RequestRenderingContext(
   request:           HttpRequest,
-  hostHeader:        Host,
   sendEntityTrigger: Option[Future[NotUsed]] = None)

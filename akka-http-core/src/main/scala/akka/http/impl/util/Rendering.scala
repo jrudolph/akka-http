@@ -329,6 +329,15 @@ private[http] class ByteStringRendering(sizeHint: Int) extends Rendering {
  * INTERNAL API
  */
 @InternalApi
+private[http] object ByteStringRendering {
+  def render(f: ByteStringRendering => ByteStringRendering, sizeHint: Int = 1000): ByteString =
+    f(new ByteStringRendering(sizeHint)).get
+}
+
+/**
+ * INTERNAL API
+ */
+@InternalApi
 private[http] class CustomCharsetByteStringRendering(nioCharset: Charset, sizeHint: Int) extends Rendering {
   private[this] val charBuffer = CharBuffer.allocate(64)
   private[this] val builder = new ByteStringBuilder

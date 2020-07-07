@@ -64,7 +64,7 @@ private[http] object WebSocketClientBlueprint {
     val (initialRequest, key) = Handshake.Client.buildRequest(uri, extraHeaders, subprotocols, settings.websocketRandomFactory())
     val hostHeader = Host(uri.authority.normalizedFor(uri.scheme))
     val renderedInitialRequest =
-      HttpRequestRendererFactory.renderStrict(RequestRenderingContext(initialRequest, hostHeader), settings, log)
+      HttpRequestRendererFactory.renderStrict(RequestRenderingContext(initialRequest), hostHeader, settings, log)
 
     class UpgradeStage extends SimpleLinearGraphStage[ByteString] {
 
