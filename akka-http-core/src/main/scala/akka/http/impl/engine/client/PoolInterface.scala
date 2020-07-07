@@ -97,9 +97,11 @@ private[http] object PoolInterface {
     }
   }
 
+  val directEC = ExecutionContext.fromExecutor(_.run())
+
   @InternalStableApi // name `Logic` and annotated methods
   private class Logic(poolId: PoolId, shape: FlowShape[ResponseContext, RequestContext], master: PoolMaster, requestOut: Outlet[RequestContext], responseIn: Inlet[ResponseContext],
-                      val log: LoggingAdapter)(implicit executionContext: ExecutionContext) extends TimerGraphStageLogic(shape) with LogHelper with PoolInterface with InHandler with OutHandler {
+                      val log: LoggingAdapter) extends TimerGraphStageLogic(shape) with LogHelper with PoolInterface with InHandler with OutHandler {
     private[this] val PoolOverflowException = new BufferOverflowException( // stack trace cannot be prevented here because `BufferOverflowException` is final
       s"Exceeded configured max-open-requests value of [${poolId.hcps.setup.settings.maxOpenRequests}]. This means that the request queue of this pool (${poolId.hcps}) " +
         s"has completely filled up because the pool currently does not process requests fast enough to handle the incoming request load. " +
@@ -135,7 +137,7 @@ private[http] object PoolInterface {
         response0 match {
           case Success(r @ HttpResponse(_, _, entity, _)) if !entity.isStrict =>
             val (newEntity, termination) = StreamUtils.transformEntityStream(entity, StreamUtils.CaptureTerminationOp)
-            termination.onComplete(_ => responseCompletedCallback.invoke(Done))
+            termination.onComplete(_ => responseCompletedCallback.invoke(Done))(directEC)
             Success(r.withEntity(newEntity))
           case Success(response) =>
             remainingRequested -= 1
@@ -201,10 +203,12 @@ private[http] object PoolInterface {
 
     // PoolInterface implementations
     override def request(request: HttpRequest, responsePromise: Promise[HttpResponse]): Unit =
-      requestCallback.invokeWithFeedback((request, responsePromise)).failed.foreach { _ =>
-        debug("Request was sent to pool which was already closed, retrying through the master to create new pool instance")
-        responsePromise.tryCompleteWith(master.dispatchRequest(poolId, request)(materializer))
-      }
+      requestCallback.invokeWithFeedback((request, responsePromise)).onComplete {
+        case Failure(_) =>
+          debug("Request was sent to pool which was already closed, retrying through the master to create new pool instance")
+          responsePromise.tryCompleteWith(master.dispatchRequest(poolId, request)(materializer))
+        case _ => // nothing to do
+      }(directEC)
     override def shutdown()(implicit ec: ExecutionContext): Future[ShutdownReason] = {
       shutdownCallback.invoke(())
       whenShutdown
