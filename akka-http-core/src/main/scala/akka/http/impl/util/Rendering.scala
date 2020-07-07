@@ -310,7 +310,7 @@ private[http] class ByteStringRendering(sizeHint: Int) extends Rendering {
   def get: ByteString = builder.result()
 
   def ~~(char: Char): this.type = {
-    builder += char.toByte
+    builder.addOne(char.toByte)
     this
   }
 
@@ -320,7 +320,7 @@ private[http] class ByteStringRendering(sizeHint: Int) extends Rendering {
   }
 
   def ~~(bytes: ByteString): this.type = {
-    if (bytes.length > 0) builder ++= bytes
+    if (bytes.length > 0) builder.addAll(bytes)
     this
   }
 }
