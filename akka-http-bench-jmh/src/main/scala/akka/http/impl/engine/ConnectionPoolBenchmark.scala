@@ -36,6 +36,8 @@ class ConnectionPoolBenchmark extends CommonBenchmark {
 
   val request = HttpRequest(uri = "http://localhost:8080")
 
+  val directEC = ExecutionContext.fromExecutor(_.run())
+
   @Benchmark
   @OperationsPerInvocation(15000)
   def singleRequest(): Unit = {
@@ -45,7 +47,7 @@ class ConnectionPoolBenchmark extends CommonBenchmark {
         .onComplete {
           case Success(_) => latch.countDown()
           case Failure(_) => throw new IllegalStateException
-        }(ExecutionContexts.parasitic)
+        }(directEC)
     }
 
     latch.await()
