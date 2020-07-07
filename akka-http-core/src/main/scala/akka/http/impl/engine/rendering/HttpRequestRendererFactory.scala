@@ -30,6 +30,13 @@ private[http] class HttpRequestRendererFactory(
   log:                   LoggingAdapter) {
   import HttpRequestRendererFactory.RequestRenderingOutput
 
+  private val userAgentHeaderByteString: ByteString =
+    userAgentHeader.fold(ByteString.empty)(header =>
+      (new ByteStringRendering(1000)
+        ~~ header
+        ~~ CrLf).get
+    )
+
   def renderToSource(ctx: RequestRenderingContext): Source[ByteString, Any] = render(ctx).byteStream
 
   def render(ctx: RequestRenderingContext): RequestRenderingOutput = {
@@ -108,7 +115,7 @@ private[http] class HttpRequestRendererFactory(
 
         case Nil =>
           if (!hostHeaderSeen) r ~~ ctx.hostHeader ~~ CrLf
-          if (!userAgentSeen && userAgentHeader.isDefined) r ~~ userAgentHeader.get ~~ CrLf
+          if (!userAgentSeen && userAgentHeader.isDefined) r ~~ userAgentHeaderByteString
           if (entity.isChunked && !entity.isKnownEmpty && !transferEncodingSeen)
             r ~~ `Transfer-Encoding` ~~ ChunkedBytes ~~ CrLf
       }
