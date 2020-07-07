@@ -21,6 +21,7 @@ private[akka] trait LogHelper {
 
   /** Override to prefix every log message with a user-defined context string */
   def prefixString: String = ""
+  val isDebugEnabled: Boolean = log.isDebugEnabled
 
   def debug(msg: String): Unit = macro LogHelper.debugMacro
   def info(msg: String): Unit = macro LogHelper.infoMacro
@@ -37,7 +38,7 @@ private[akka] object LogHelper {
       {
         val logHelper = ctx.prefix.splice
         val log = logHelper.log
-        if (log.isDebugEnabled)
+        if (logHelper.isDebugEnabled)
           log.debug(logHelper.prefixString + msg.splice)
       }
     }

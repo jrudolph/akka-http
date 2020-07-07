@@ -64,6 +64,7 @@ private[client] object NewHostConnectionPool {
     def createLogic(inheritedAttributes: Attributes): GraphStageLogic =
       new GraphStageLogic(shape) with StageLoggingWithOverride with InHandler with OutHandler { logic =>
         override def logOverride: LoggingAdapter = _log
+        private val isDebugEnabled = _log.isDebugEnabled
 
         setHandlers(requestsIn, responsesOut, this)
 
@@ -116,7 +117,7 @@ private[client] object NewHostConnectionPool {
               pull(requestsIn)
 
         def hasIdleSlots: Boolean = {
-          if (log.isDebugEnabled) { // somewhat sneaky way of enabling extra assertions in "debug-mode"
+          if (isDebugEnabled) { // somewhat sneaky way of enabling extra assertions in "debug-mode"
             // Helps debugging if you suspect that idleSlots are not consistent with actual state any more
             val idle = idleSlots.asScala.map(_.slotId).toSet
             val idleAll = slots.filter(_.isIdle).map(_.slotId).toSet
