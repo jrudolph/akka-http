@@ -37,9 +37,9 @@ private[akka] object LogHelper {
     ctx.universe.reify {
       {
         val logHelper = ctx.prefix.splice
-        val log = logHelper.log
-        if (logHelper.isDebugEnabled)
-          log.debug(logHelper.prefixString + msg.splice)
+        if (logHelper.isDebugEnabled) {
+          logHelper.log.debug(logHelper.prefixString + msg.splice)
+        }
       }
     }
   def infoMacro(ctx: LoggerContext)(msg: ctx.Expr[String]): ctx.Expr[Unit] =
