@@ -18,16 +18,18 @@ import akka.http.scaladsl.settings.ServerSettings
 import scala.collection.immutable
 import scala.collection.immutable.VectorBuilder
 
-private[http2] class ResponseRendering(settings: ServerSettings, log: LoggingAdapter) extends RenderFactory[HttpResponse](log) {
+/** INTERNAL API */
+@InternalApi
+private[http2] class ResponseRenderer(settings: ServerSettings, val log: LoggingAdapter) extends Renderer[HttpResponse] {
 
-  def failBecauseOfMissingAttribute: Nothing =
+  protected override def nextStreamId(response: HttpResponse): Int = response.attribute(Http2.streamId).getOrElse(failBecauseOfMissingAttribute)
+
+  private def failBecauseOfMissingAttribute: Nothing =
     // attribute is missing, shutting down because we will most likely otherwise miss a response and leak a substream
     // TODO: optionally a less drastic measure would be only resetting all the active substreams
     throw new RuntimeException("Received response for HTTP/2 request without x-http2-stream-id attribute. Failing connection.")
 
-  override def nextStreamId(response: HttpResponse): Int = response.attribute(Http2.streamId).getOrElse(failBecauseOfMissingAttribute)
-
-  override def initialHeaderPairs(response: HttpResponse): VectorBuilder[(String, String)] = {
+  protected override def initialHeaderPairs(response: HttpResponse): VectorBuilder[(String, String)] = {
     val headerPairs = new VectorBuilder[(String, String)]()
     // From https://tools.ietf.org/html/rfc7540#section-8.1.2.4:
     //   HTTP/2 does not define a way to carry the version or reason phrase
@@ -35,17 +37,18 @@ private[http2] class ResponseRendering(settings: ServerSettings, log: LoggingAda
     headerPairs += ":status" -> response.status.intValue.toString
   }
 
-  override lazy val peerIdHeader: Option[(String, String)] = settings.serverHeader.map(h => h.lowercaseName -> h.value)
+  protected override val peerIdHeader: Option[(String, String)] = settings.serverHeader.map(h => h.lowercaseName -> h.value)
 
 }
 
+/** INTERNAL API */
 @InternalApi
-private[http2] class RequestRendering(settings: ClientConnectionSettings, log: LoggingAdapter) extends RenderFactory[HttpRequest](log) {
+private[http2] class RequestRenderer(settings: ClientConnectionSettings, val log: LoggingAdapter) extends Renderer[HttpRequest] {
 
-  val streamId = new AtomicInteger(1)
-  override def nextStreamId(r: HttpRequest): Int = streamId.getAndAdd(2)
+  private val streamId = new AtomicInteger(1)
+  protected override def nextStreamId(r: HttpRequest): Int = streamId.getAndAdd(2)
 
-  override def initialHeaderPairs(request: HttpRequest): VectorBuilder[(String, String)] = {
+  protected override def initialHeaderPairs(request: HttpRequest): VectorBuilder[(String, String)] = {
     val headerPairs = new VectorBuilder[(String, String)]()
     headerPairs += ":method" -> request.method.value
     headerPairs += ":scheme" -> request.uri.scheme
@@ -54,21 +57,23 @@ private[http2] class RequestRendering(settings: ClientConnectionSettings, log: L
     headerPairs
   }
 
-  override lazy val peerIdHeader: Option[(String, String)] = settings.userAgentHeader.map(h => h.lowercaseName -> h.value)
+  protected override val peerIdHeader: Option[(String, String)] = settings.userAgentHeader.map(h => h.lowercaseName -> h.value)
 }
 
-abstract class RenderFactory[R <: HttpMessage](log: LoggingAdapter) {
+/** INTERNAL API */
+@InternalApi
+private[http] sealed abstract class Renderer[R <: HttpMessage] extends (R => Http2SubStream) {
 
-  def nextStreamId(r: R): Int
-  def initialHeaderPairs(r: R): VectorBuilder[(String, String)]
-  def peerIdHeader: Option[(String, String)]
+  protected def log: LoggingAdapter
+  protected def nextStreamId(r: R): Int
+  protected def initialHeaderPairs(r: R): VectorBuilder[(String, String)]
+  protected def peerIdHeader: Option[(String, String)]
 
-  val renderer: R => Http2SubStream = { (r: R) =>
-
+  def apply(r: R): Http2SubStream = {
     val headerPairs = initialHeaderPairs(r)
 
-    CommonRendering.addContentHeaders(headerPairs, r.entity)
-    CommonRendering.renderHeaders(r.headers, headerPairs, peerIdHeader, log, isServer = r.isResponse)
+    Renderer.addContentHeaders(headerPairs, r.entity)
+    Renderer.renderHeaders(r.headers, headerPairs, peerIdHeader, log, isServer = r.isResponse)
 
     val headersFrame = ParsedHeadersFrame(nextStreamId(r), endStream = r.entity.isKnownEmpty, headerPairs.result(), None)
 
@@ -76,7 +81,9 @@ abstract class RenderFactory[R <: HttpMessage](log: LoggingAdapter) {
   }
 }
 
-private[http2] object CommonRendering {
+/** INTERNAL API */
+@InternalApi
+private[http2] object Renderer {
 
   @volatile
   private var cachedDateHeader = (0L, ("", ""))
@@ -95,13 +102,13 @@ private[http2] object CommonRendering {
   /**
    * Mutates `headerPairs` adding headers related to content (type and length).
    */
-  private[http2] def addContentHeaders(headerPairs: VectorBuilder[(String, String)], entity: HttpEntity): Unit = {
+  def addContentHeaders(headerPairs: VectorBuilder[(String, String)], entity: HttpEntity): Unit = {
     if (entity.contentType != ContentTypes.NoContentType)
       headerPairs += "content-type" -> entity.contentType.toString
     entity.contentLengthOption.foreach(headerPairs += "content-length" -> _.toString)
   }
 
-  private[http2] def renderHeaders(
+  def renderHeaders(
     headers:  immutable.Seq[HttpHeader],
     log:      LoggingAdapter,
     isServer: Boolean
@@ -116,7 +123,7 @@ private[http2] object CommonRendering {
    * @param peerIdHeader a header providing extra information (e.g. vendor and version) about the
    *                     peer. For example, a User-Agent on the client or a Server header on the server.
    */
-  private[http2] def renderHeaders(
+  def renderHeaders(
     headersSeq:   immutable.Seq[HttpHeader],
     headerPairs:  VectorBuilder[(String, String)],
     peerIdHeader: Option[(String, String)],

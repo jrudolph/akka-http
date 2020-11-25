@@ -17,7 +17,7 @@ import akka.http.scaladsl.model._
 import akka.http.scaladsl.model.HttpEntity.{ Chunk, Chunked, LastChunk }
 import akka.http.scaladsl.model.HttpMethods.GET
 import akka.http.scaladsl.model.headers.CacheDirectives._
-import akka.http.scaladsl.model.headers.{ RawHeader, `Access-Control-Allow-Origin`, `Cache-Control`, `Content-Length`, `Content-Type`, `User-Agent` }
+import akka.http.scaladsl.model.headers.{ RawHeader, `Access-Control-Allow-Origin`, `Cache-Control`, `Content-Length`, `Content-Type` }
 import akka.http.scaladsl.settings.ClientConnectionSettings
 import akka.stream.Attributes
 import akka.stream.Attributes.LogLevels
